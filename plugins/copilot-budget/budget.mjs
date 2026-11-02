@@ -272,6 +272,9 @@ export function forecast({ plan, history, now = Date.now(), target = 100 }) {
 }
 
 // ---------- rendering ----------
+// The pane is a grid of rack cells (about CELL_W x CELL_H). Data modules are placed greedily in
+// priority order using the largest shape that still fits; empty cells become decorative "art"
+// synth modules so the rack always looks full.
 
 const DIGITS = {
   0: ['███', '█ █', '█ █', '█ █', '███'], 1: [' █ ', '██ ', ' █ ', ' █ ', '███'],
@@ -291,143 +294,491 @@ export const gradient = (t) => {
   const [[a, from], [b, to]] = [STOPS[i - 1], STOPS[i]];
   return from.map((c, j) => Math.round(c + (to[j] - c) * (t - a) / (b - a))).join(';');
 };
+const BG = '6;18;20';
 const TRACK = '38;44;47';
+const RULE = '30;52;54';
 const INK = '255;248;232';
 const INK_ON_FILL = '21;24;26';
 const DIM = '127;163;160';
 const AMBER = '242;200;120';
 const ALERT = '242;140;120';
 const UBUNTU = '200;131;74';
-const CALM = gradient(0.35);
+const CALM = gradient(0.55);
+const LEDS = { ok: CALM, warn: AMBER, alert: ALERT };
+const CELL_W = 12;
+const CELL_H = 5;
 
 const compact = (value) => !finite(value) ? '--' : value >= 10000 ? `${Math.round(value / 1000)}k`
   : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${Math.round(value)}`;
 const percent = (value) => finite(value) ? `${Math.round(value)}%` : '--';
 const shortModel = (model) => (model ?? '').replace(/^claude-/, '').replace(/^gpt-/, 'g').replace(/[-.]/g, '');
+const knob = (fraction) => '○◔◑◕●'[Math.round(clamp(fraction, 0, 1) * 4)];
+const hash = (a, b) => (((a + 1) * 73856093) ^ ((b + 1) * 19349663)) >>> 0;
+const severity = (value, warn, alert) => !finite(value) ? null : value >= alert ? 'alert' : value >= warn ? 'warn' : 'ok';
 
-// Horizontal bar filling left to right; the figure is drawn as block numerals when the bar has
-// five rows and room, otherwise as text on its middle row.
-function bar(plan, fc, width, height, color) {
-  const used = !plan?.expired && finite(plan?.usedPercent) ? clamp(plan.usedPercent, 0, 100) : null;
-  const label = plan?.expired ? 'EXP' : plan?.unlimited ? 'UNL' : used !== null ? `${Math.round(used)}%` : '--';
-  const eighths = used === null ? 0 : Math.round(used / 100 * width * 8);
-  const full = Math.floor(eighths / 8);
-  const part = eighths % 8;
-  const colOf = (value) => finite(value) ? Math.min(width - 1, Math.floor(clamp(value, 0, 100) / 100 * width)) : -1;
-  const paceAt = colOf(fc?.pace);
-  const projAt = colOf(fc?.projected);
-  const big = [0, 1, 2, 3, 4].map((r) => [...label].map((c) => DIGITS[c]?.[r] ?? '   ').join(' '));
-  const fits = big[0].length <= width && height >= 5 && [...label].every((c) => c in DIGITS);
-  const top = Math.floor((height - 5) / 2);
-  const left = Math.floor((width - (fits ? big[0].length : label.length)) / 2);
-  const middle = Math.floor((height - 1) / 2);
-  const lines = [];
-  for (let y = 0; y < height; y++) {
-    let out = '';
-    let last = '';
-    for (let x = 0; x < width; x++) {
-      const tone = gradient(width > 1 ? x / (width - 1) : 1);
-      const filled = x < full;
-      const edge = x === full && part > 0;
-      let char = filled ? '█' : edge ? EIGHTHS[part] : '·';
-      let shown = edge ? char : ' ';
-      let fg = edge ? tone : null;
-      let bg = filled ? tone : TRACK;
-      if (x === projAt && x !== paceAt) [char, shown, fg] = ['┆', '┆', filled ? INK_ON_FILL : ALERT];
-      if (x === paceAt) [char, shown, fg] = ['│', '│', filled ? INK_ON_FILL : AMBER];
-      if (fits ? y >= top && y < top + 5 && big[y - top][x - left] === '█' : y === middle && label[x - left]?.trim()) {
-        if (fits) [char, shown, fg, bg] = filled || edge ? [' ', ' ', null, null] : ['█', ' ', null, INK];
-        else [char, shown, fg] = [label[x - left], label[x - left], filled ? INK_ON_FILL : INK];
-      }
-      if (!color) out += char;
-      else {
-        const code = `${fg ? `38;2;${fg}` : '39'};${bg ? `48;2;${bg}` : '49'}`;
-        out += (code === last ? '' : `\x1b[${code}m`) + shown;
+// A fixed-size character grid; every render goes through it so output is always width x height.
+class Canvas {
+  constructor(width, height, color) {
+    Object.assign(this, { w: width, h: height, color });
+    this.cells = Array.from({ length: height }, () => Array.from({ length: width }, () => ({ ch: ' ', fg: null, bg: null })));
+  }
+
+  put(x, y, ch, fg = null, bg) {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
+    const cell = this.cells[y][x];
+    cell.ch = ch;
+    cell.fg = fg;
+    if (bg !== undefined) cell.bg = bg;
+  }
+
+  text(x, y, text, fg, max = Infinity) {
+    [...text].slice(0, Math.max(0, max)).forEach((ch, i) => this.put(x + i, y, ch, fg));
+  }
+
+  fill(x, y, w, h, bg) {
+    for (let r = y; r < y + h; r++) for (let c = x; c < x + w; c++) this.put(c, r, ' ', null, bg);
+  }
+
+  toString() {
+    return this.cells.map((row) => {
+      if (!this.color) return row.map((c) => c.ch).join('');
+      let out = '';
+      let last = '';
+      for (const c of row) {
+        const code = `${c.fg ? `38;2;${c.fg}` : '39'};${c.bg ? `48;2;${c.bg}` : '49'}`;
+        out += (code === last ? '' : `\x1b[${code}m`) + c.ch;
         last = code;
       }
-    }
-    lines.push(color ? `${out}\x1b[0m` : out);
+      return `${out}\x1b[0m`;
+    }).join('\n');
   }
-  return lines;
+}
+
+const led = (cv, x, y, state) => cv.put(x, y, cv.color || state !== 'ok' ? '●' : '○', LEDS[state]);
+
+// Synth-panel frame: rounded border in the teal gradient, screw dots and a small label.
+function frame(cv, b, title, art) {
+  cv.fill(b.x, b.y, b.w, b.h, BG);
+  const tone = (x) => gradient((art ? 0.12 : 0.3) + (art ? 0.3 : 0.55) * x / Math.max(1, cv.w - 1));
+  for (let i = 0; i < b.w; i++) {
+    const x = b.x + i;
+    const end = i === 0 ? 0 : i === b.w - 1 ? 1 : -1;
+    cv.put(x, b.y, end < 0 ? '─' : '╭╮'[end], tone(x));
+    cv.put(x, b.y + b.h - 1, end < 0 ? '─' : '╰╯'[end], tone(x));
+  }
+  for (let r = 1; r < b.h - 1; r++) {
+    cv.put(b.x, b.y + r, '│', tone(b.x));
+    cv.put(b.x + b.w - 1, b.y + r, '│', tone(b.x + b.w - 1));
+  }
+  if (b.w >= 8) {
+    for (const y of [b.y, b.y + b.h - 1]) {
+      cv.put(b.x + 1, y, '◦', DIM);
+      cv.put(b.x + b.w - 2, y, '◦', DIM);
+    }
+  }
+  if (title && b.w >= title.length + 6) cv.text(b.x + 2, b.y, ` ${title} `, art ? DIM : gradient(0.95));
+  return { x: b.x + 1, y: b.y + 1, w: b.w - 2, h: b.h - 2 };
+}
+
+// Label left, value right, optional status LED in front.
+function kv(cv, x, y, w, item) {
+  if (w <= 0) return;
+  let lx = x;
+  let lw = w;
+  if (item.state && w >= 10) {
+    led(cv, x, y, item.state);
+    lx += 2;
+    lw -= 2;
+  }
+  const value = item.value.slice(0, lw);
+  cv.text(lx, y, item.label.slice(0, Math.max(0, lw - value.length - 1)), DIM);
+  cv.text(x + w - value.length, y, value, item.tone ?? INK);
+}
+
+// Key/value items flowed into as many columns as needed (and fit), centred in the box.
+function kvGrid(cv, b, items) {
+  if (!items.length || b.h <= 0 || b.w <= 0) return;
+  const maxCols = Math.max(1, Math.floor((b.w + 2) / 12));
+  const cols = clamp(Math.ceil(items.length / b.h), 1, maxCols);
+  items = items.slice(0, cols * b.h);
+  const per = Math.ceil(items.length / cols);
+  const cw = Math.min(18, Math.floor((b.w - 2 * (cols - 1)) / cols));
+  const left = b.x + Math.floor((b.w - (cw * cols + 2 * (cols - 1))) / 2);
+  const top = b.y + Math.floor((b.h - per) / 2);
+  items.forEach((item, i) => kv(cv, left + Math.floor(i / per) * (cw + 2), top + i % per, cw, item));
+}
+
+// VU-style meter row: optional dim prefix, then ▆ cells.
+function meter(cv, x, y, w, value, prefix = '', tone = null) {
+  if (prefix.length > w - 3) prefix = '';
+  cv.text(x, y, prefix, DIM);
+  const cells = w - prefix.length;
+  const fill = Math.round(clamp(finite(value) ? value : 0, 0, 100) / 100 * cells);
+  const shade = tone ?? LEDS[severity(value, 75, 90) ?? 'ok'];
+  for (let i = 0; i < cells; i++) {
+    const on = i < fill;
+    cv.put(x + prefix.length + i, y, cv.color || on ? '▆' : '·', on ? shade : TRACK);
+  }
+}
+
+// Horizontal plan bar filling left to right in the teal gradient, with pace │ and projection ┆.
+function planBar(cv, x, y, w, rows, used, fc) {
+  if (w <= 0) return;
+  const eighths = used === null ? 0 : Math.round(used / 100 * w * 8);
+  const full = Math.floor(eighths / 8);
+  const part = eighths % 8;
+  const colOf = (value) => finite(value) ? Math.min(w - 1, Math.floor(clamp(value, 0, 100) / 100 * w)) : -1;
+  const paceAt = colOf(fc?.pace);
+  const projAt = colOf(fc?.projected);
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < w; i++) {
+      const tone = gradient(w > 1 ? i / (w - 1) : 1);
+      const filled = i < full;
+      const edge = i === full && part > 0;
+      let ch = cv.color ? (edge ? EIGHTHS[part] : ' ') : filled ? '█' : edge ? EIGHTHS[part] : '·';
+      let fg = edge ? tone : null;
+      if (i === projAt && i !== paceAt) [ch, fg] = ['┆', filled ? INK_ON_FILL : ALERT];
+      if (i === paceAt) [ch, fg] = ['│', filled ? INK_ON_FILL : AMBER];
+      cv.put(x + i, y + r, ch, fg, cv.color ? (filled ? tone : TRACK) : null);
+    }
+  }
+}
+
+const planLabel = (plan) => plan?.expired ? 'EXP' : plan?.unlimited ? 'UNL'
+  : finite(plan?.usedPercent) ? `USED ${Math.round(clamp(plan.usedPercent, 0, 100))}%` : '--';
+
+function planModule(cv, b, data) {
+  const fc = data.forecast;
+  const plan = data.plan;
+  const used = !plan?.expired && finite(plan?.usedPercent) ? clamp(plan.usedPercent, 0, 100) : null;
+  const label = plan?.expired ? 'EXP' : plan?.unlimited ? 'UNL' : used !== null ? `${Math.round(used)}%` : '--';
+  const state = used === null ? null : used >= 90 ? 'alert' : fc && used > fc.pace + 5 ? 'warn' : 'ok';
+  if (b.h <= 1) {
+    const head = `${label} `;
+    cv.text(b.x, b.y, head, INK, b.w);
+    planBar(cv, b.x + head.length, b.y, b.w - head.length, 1, used, fc);
+    return;
+  }
+  const glyphs = [...label];
+  const bigW = glyphs.length * 4 - 1;
+  const big = glyphs.every((c) => c in DIGITS) && b.h >= 7 && b.w >= bigW + 2;
+  const rest = b.h - (big ? 5 : 1);
+  const barRows = rest >= 5 ? 3 : rest >= 4 ? 2 : rest >= 1 ? 1 : 0;
+  const legend = rest - barRows >= 1 ? 1 : 0;
+  const gap = rest - barRows - legend >= 1 ? 1 : 0;
+  let y = b.y + Math.floor((rest - barRows - legend - gap) / 2);
+  if (big) {
+    const left = b.x + Math.floor((b.w - bigW) / 2);
+    for (let r = 0; r < 5; r++) {
+      glyphs.forEach((g, i) => [...DIGITS[g][r]].forEach((ch, j) => {
+        if (ch !== ' ') cv.put(left + i * 4 + j, y + r, '█', gradient(0.5 + 0.5 * (i * 4 + j) / Math.max(1, bigW - 1)));
+      }));
+    }
+    if (state && left - b.x >= 3) led(cv, left - 3, y + 2, state);
+    y += 5;
+  } else {
+    const left = b.x + Math.floor((b.w - label.length) / 2);
+    if (state && left - b.x >= 2) led(cv, left - 2, y, state);
+    cv.text(left, y, label, INK);
+    y += 1;
+  }
+  y += gap;
+  const inset = b.w >= 14 ? 1 : 0;
+  planBar(cv, b.x + inset, y, b.w - 2 * inset, barRows, used, fc);
+  y += barRows;
+  if (!legend) return;
+  const pace = finite(fc?.pace) ? `│ pace ${percent(fc.pace)}` : '0%';
+  const proj = finite(fc?.projected) ? `proj ${percent(fc.projected)} ┆` : '100%';
+  if (pace.length + proj.length + 1 <= b.w - 2 * inset) {
+    cv.text(b.x + inset, y, pace, finite(fc?.pace) ? AMBER : DIM);
+    cv.text(b.x + b.w - inset - proj.length, y, proj, finite(fc?.projected) ? ALERT : DIM);
+  } else if (finite(fc?.pace)) {
+    cv.text(b.x + inset, y, `│${percent(fc.pace)}`, AMBER, b.w);
+    const short = finite(fc.projected) ? `proj ${percent(fc.projected)}┆` : '';
+    if (short.length + percent(fc.pace).length + 2 <= b.w - 2 * inset) cv.text(b.x + b.w - inset - short.length, y, short, ALERT);
+  }
+}
+
+// Items first, then optional meter rows at the bottom when there is room.
+function stack(cv, b, items, meters = []) {
+  const extra = meters.slice(0, Math.max(0, b.h - Math.min(items.length, b.h)));
+  const room = b.h - extra.length;
+  const shown = Math.min(items.length, room);
+  const slack = room - shown;
+  kvGrid(cv, { ...b, y: b.y + Math.floor(slack / 2), h: shown }, items);
+  extra.forEach((draw, i) => draw(b.x + (b.w >= 14 ? 1 : 0), b.y + room + i, b.w - (b.w >= 14 ? 2 : 0)));
+}
+
+function cycleModule(cv, b, data) {
+  const fc = data.forecast;
+  stack(cv, b, [
+    { label: 'RESET', value: fc ? `${fc.daysToReset}d` : '--' },
+    { label: 'PACE', value: fc ? `${knob(fc.pace / 100)} ${percent(fc.pace)}` : '--',
+      tone: fc && fc.used > fc.pace ? AMBER : CALM, state: fc ? (fc.used > fc.pace ? 'warn' : 'ok') : null },
+  ], fc ? [(x, y, w) => meter(cv, x, y, w, fc.pace, 'cyc ', gradient(0.4))] : []);
+}
+
+function todayModule(cv, b, data) {
+  const fc = data.forecast;
+  const items = [{ label: 'AIC', value: compact(data.today) }];
+  if (data.remote !== undefined) {
+    items.push({ label: 'UBU', value: data.remote === null ? 'off' : compact(data.remote.credits),
+      state: data.remote === null ? 'warn' : 'ok' });
+  }
+  const ratio = finite(fc?.dailyTarget) && fc.dailyTarget > 0 && finite(data.today) ? data.today / fc.dailyTarget * 100 : null;
+  stack(cv, b, items, ratio === null ? [] : [(x, y, w) => meter(cv, x, y, w, ratio, 'day ', LEDS[severity(ratio, 100, 150)])]);
+}
+
+function forecastModule(cv, b, data) {
+  const fc = data.forecast;
+  const over = fc.overshoot;
+  const items = [
+    { label: 'PROJ', value: percent(fc.projected), state: severity(fc.projected, fc.target + 0.5, 100.5),
+      tone: !finite(fc.projected) ? INK : fc.projected > 100 ? ALERT : fc.projected > fc.target ? AMBER : CALM },
+    { label: finite(over) && over > 0 ? 'OVER' : 'UNDER', value: finite(over) ? `${over > 0 ? '+' : ''}${Math.round(over)}%` : '--',
+      tone: finite(over) && over > 0 ? ALERT : CALM },
+    { label: 'CAP', value: fc.capAt ? new Date(fc.capAt).toISOString().slice(5, 10) : 'none', tone: fc.capAt ? ALERT : INK },
+    { label: 'DAY', value: compact(fc.dailyTarget),
+      tone: finite(fc.burn) && finite(fc.dailyTarget) && fc.burn > fc.dailyTarget ? AMBER : INK },
+    { label: 'BURN', value: compact(fc.burn) },
+    { label: 'TGT', value: percent(fc.target) },
+  ];
+  const spark = (x, y, w) => {
+    const trend = fc.trend.slice(-Math.max(1, w - 4));
+    const peak = Math.max(...trend, 1);
+    cv.text(x, y, '14d', DIM);
+    const left = x + w - trend.length;
+    trend.forEach((v, i) => {
+      const level = v > 0 ? Math.min(7, Math.floor(v / peak * 8)) : -1;
+      cv.put(left + i, y, level < 0 ? '·' : SPARK[level], level < 0 ? TRACK : gradient(0.35 + level / 11));
+    });
+  };
+  stack(cv, b, items, b.h >= 4 ? [spark] : []);
+}
+
+function modelModule(cv, b, data) {
+  const fc = data.forecast;
+  stack(cv, b, [
+    { label: 'MIX', value: `${knob((fc.mix - 0.5) / 1.5)} x${fc.mix.toFixed(1)}`, tone: fc.mix > 1.2 ? AMBER : INK },
+    { label: 'CTX', value: `${fc.grade} ${percent(finite(fc.cache) ? fc.cache * 100 : null)}`,
+      tone: fc.grade === 'C' ? ALERT : fc.grade === 'B' ? AMBER : CALM,
+      state: fc.grade === 'C' ? 'alert' : fc.grade === 'B' ? 'warn' : fc.grade === 'A' ? 'ok' : null },
+  ], finite(fc.cache) ? [(x, y, w) => meter(cv, x, y, w, fc.cache * 100, 'cache ', gradient(0.6))] : []);
+}
+
+function agentsModule(cv, b, data) {
+  const agents = data.agents;
+  const peak = Math.max(...agents.map((a) => finite(a.context) ? a.context : 0));
+  if (b.w < 16 || (b.h < 2 && agents.length > 1)) {
+    kvGrid(cv, b, [{ label: 'LIVE', value: `${agents.length}` },
+      { label: 'MAX', value: percent(peak), state: severity(peak, 75, 90) }]);
+    return;
+  }
+  const rows = agents.length <= b.h ? agents.length : b.h - 1;
+  const top = b.y + Math.floor((b.h - rows - (agents.length > rows ? 1 : 0)) / 2);
+  agents.slice(0, rows).forEach((a, i) => {
+    const y = top + i;
+    const pct = percent(a.context);
+    const name = (a.ubuntu ? 'u ' : '') + safeText(a.label);
+    const nameW = Math.min(name.length, 12, Math.max(4, Math.floor(b.w * 0.4)));
+    led(cv, b.x, y, severity(a.context, 75, 90) ?? 'ok');
+    cv.text(b.x + 2, y, name, a.ubuntu ? UBUNTU : DIM, nameW);
+    cv.text(b.x + b.w - pct.length, y, pct, INK);
+    let x = b.x + 2 + 13;
+    const tag = a.model ? `${shortModel(a.model).slice(0, 7)}${a.effort ? `·${a.effort[0]}` : ''}` : '';
+    const gaugeEnd = b.x + b.w - pct.length - 1;
+    if (tag && gaugeEnd - x - tag.length - 1 >= 6) {
+      cv.text(x, y, tag, DIM);
+      x += tag.length + 1;
+    }
+    if (b.w < 26) x = b.x + 2 + nameW + 1;
+    if (gaugeEnd - x >= 3) meter(cv, x, y, gaugeEnd - x, a.context);
+  });
+  if (agents.length > rows) cv.text(b.x + 2, top + rows, `+${agents.length - rows} more`, DIM, b.w - 2);
+}
+
+function sysModule(cv, b, data) {
+  (data.errors ?? []).slice(0, b.h).forEach((e, i) => cv.text(b.x, b.y + i, safeText(e), ALERT, b.w));
+}
+
+// ---------- art modules ----------
+
+const ART = ['OSC ∿', 'VCF', 'LFO', 'SEQ', 'ENV', 'MULT', 'VCA', 'VU', ''];
+const KNOB_GLYPHS = '◐◓◑◒●';
+const KNOB_NAMES = { VCF: ['CUT', 'RES', 'ENV', 'KEY'], VCA: ['GAIN', 'LVL', 'CV', 'PAN'] };
+
+// Plot a function v(t) in [0,1] over the box with slope glyphs.
+function plot(cv, b, f, tone, vertices = false) {
+  let prev = null;
+  for (let i = 0; i < b.w; i++) {
+    const v = clamp(f(b.w > 1 ? i / (b.w - 1) : 0), 0, 1);
+    const r = Math.round((1 - v) * (b.h - 1));
+    const next = clamp(f(b.w > 1 ? (i + 1) / (b.w - 1) : 0), 0, 1);
+    const slope = Math.round((1 - next) * (b.h - 1)) - r;
+    const ch = slope < 0 ? '╱' : slope > 0 ? '╲' : vertices && prev !== null && prev !== r ? '•' : '─';
+    cv.put(b.x + i, b.y + r, ch, tone(i));
+    prev = r;
+  }
+}
+
+function artModule(cv, b, kind, seed, now) {
+  if (b.w <= 0 || b.h <= 0) return;
+  const tone = (i) => gradient(0.3 + 0.35 * i / Math.max(1, b.w - 1));
+  const tick = Math.floor(now / 1000);
+  if (kind === 'OSC ∿') {
+    const mid = b.y + Math.floor(b.h / 2);
+    if (b.h >= 3) for (let i = 0; i < b.w; i++) cv.put(b.x + i, mid, '┄', RULE);
+    const phase = now / 900 + seed;
+    const cycles = 1 + seed % 2;
+    for (let i = 0; i < b.w; i++) {
+      const v = Math.sin(phase + i / Math.max(1, b.w) * cycles * 2 * Math.PI);
+      cv.put(b.x + i, b.y + Math.round((1 - v) / 2 * (b.h - 1)), '•', tone(i));
+    }
+  } else if (kind === 'LFO') {
+    const shift = (tick / 7 + seed % 5 / 5) % 1;
+    plot(cv, b, (t) => 1 - Math.abs(((t * 2 + shift) % 2) - 1), tone);
+  } else if (kind === 'ENV') {
+    const a = 0.08 + seed % 4 * 0.05;
+    const d = a + 0.1 + seed % 3 * 0.05;
+    const s = 0.35 + seed % 5 * 0.1;
+    const r = 0.62 + seed % 3 * 0.08;
+    plot(cv, b, (t) => t < a ? t / a : t < d ? 1 - (t - a) / (d - a) * (1 - s) : t < r ? s
+      : t < r + 0.2 ? s * (1 - (t - r) / 0.2) : 0, tone, true);
+  } else if (kind === 'VCF' || kind === 'VCA') {
+    const names = KNOB_NAMES[kind];
+    const count = Math.min(names.length, Math.max(1, Math.floor((b.w + 1) / 5)));
+    const left = b.x + Math.floor((b.w - (count * 5 - 1)) / 2);
+    const top = b.y + Math.max(0, Math.floor((b.h - 3) / 2));
+    for (let i = 0; i < count; i++) {
+      const x = left + i * 5;
+      cv.put(x + 1, top, KNOB_GLYPHS[(seed + i * 3 + Math.floor(tick / 30)) % 5], gradient(0.5 + i * 0.1));
+      if (b.h >= 2) cv.text(x, top + 1, names[i].slice(0, 4), DIM);
+      if (b.h >= 3) cv.put(x + 1, top + 2, '◎', gradient(0.3));
+    }
+  } else if (kind === 'SEQ') {
+    const steps = Math.max(1, Math.min(16, Math.floor((b.w + 1) / 2)));
+    const left = b.x + Math.floor((b.w - (steps * 2 - 1)) / 2);
+    const active = Math.floor(now / 2000) % steps;
+    for (let i = 0; i < steps; i++) {
+      const lit = i === active || (seed >> i) % 4 === 0;
+      cv.put(left + i * 2, b.y, cv.color || lit ? '●' : '○', i === active ? AMBER : lit ? CALM : TRACK);
+      for (let r = 1; r < b.h; r++) {
+        const level = (hash(i, seed) >> (r * 3)) % 8;
+        cv.put(left + i * 2, b.y + r, SPARK[level], gradient(0.25 + level / 16));
+      }
+    }
+  } else if (kind === 'VU') {
+    const rows = Math.min(b.h, 3);
+    const top = b.y + Math.floor((b.h - rows) / 2);
+    for (let r = 0; r < rows; r++) {
+      const level = 35 + 45 * Math.abs(Math.sin(now / 1300 + seed + r * 1.7));
+      meter(cv, b.x, top + r, b.w, level, `${'LRM'[r]} `, gradient(0.45));
+    }
+  } else if (kind === 'MULT') {
+    const jacks = Math.max(1, Math.floor((b.w + 2) / 4));
+    const left = b.x + Math.floor((b.w - (jacks * 4 - 3)) / 2);
+    for (let i = 0; i < jacks; i++) cv.put(left + i * 4, b.y, '◎', gradient(0.45));
+    const cables = [AMBER, UBUNTU, gradient(0.7)];
+    for (let p = 0; p + 1 < jacks && b.h >= 2; p += 2) {
+      const a = left + p * 4;
+      const z = left + (p + 1) * 4 + (p + 2 < jacks && seed % 2 ? 4 : 0);
+      const depth = Math.min(b.h - 1, 1 + (seed + p) % 2);
+      const tint = cables[(seed + p) % cables.length];
+      for (let r = 1; r < depth; r++) { cv.put(a, b.y + r, '│', tint); cv.put(z, b.y + r, '│', tint); }
+      cv.put(a, b.y + depth, '╰', tint);
+      for (let x = a + 1; x < z; x++) cv.put(x, b.y + depth, '─', tint);
+      cv.put(z, b.y + depth, '╯', tint);
+    }
+  } else {
+    const vw = Math.max(1, Math.floor(b.w / 2));
+    for (let r = 0; r < b.h; r++) {
+      if (r % 2 === b.h % 2) continue;
+      for (let i = 0; i < vw; i++) cv.put(b.x + Math.floor((b.w - vw) / 2) + i, b.y + r, '┄', RULE);
+    }
+  }
+}
+
+// ---------- layout ----------
+
+// Tiny panes: the plan figure and bar on the first line, then the key numbers one per line.
+function tinyView(cv, data) {
+  const fc = data.forecast;
+  planModule(cv, { x: 0, y: 0, w: cv.w, h: 1 }, data);
+  const items = [
+    { label: 'RST', value: fc ? `${fc.daysToReset}d` : '--' },
+    { label: 'PACE', value: percent(fc?.pace) },
+    { label: 'PROJ', value: percent(fc?.projected), tone: fc?.projected > 100 ? ALERT : INK },
+    { label: 'AIC', value: compact(data.today) },
+  ];
+  if (data.remote !== undefined) items.push({ label: 'UBU', value: data.remote === null ? 'off' : compact(data.remote.credits) });
+  if (data.agents?.length) {
+    items.push({ label: 'AG', value: `${data.agents.length} ${percent(Math.max(...data.agents.map((a) => a.context ?? 0)))}` });
+  }
+  items.slice(0, cv.h - 1).forEach((item, i) => kv(cv, 0, i + 1, cv.w, item));
 }
 
 export function render(data, width = 20, height = 40, now = Date.now(), { color = false } = {}) {
-  width = Math.max(4, Math.floor(width));
+  width = Math.max(1, Math.floor(width));
   height = Math.max(1, Math.floor(height));
+  const cv = new Canvas(width, height, color);
+  if (width < 20 || height < 6) {
+    tinyView(cv, data);
+    return cv.toString();
+  }
+  const cols = Math.max(1, Math.floor(width / CELL_W));
+  const rows = Math.max(1, Math.floor(height / CELL_H));
+  const xs = Array.from({ length: cols + 1 }, (_, i) => Math.floor(i * width / cols));
+  const ys = Array.from({ length: rows + 1 }, (_, i) => Math.floor(i * height / rows));
+  const cellH = height / rows;
   const fc = data.forecast;
-  // Wide panes split the metrics into columns (min 20 cells each) using the fewest columns that
-  // fit; whatever height is left goes to the bar.
-  // The % bar stays prominent: it keeps 5 rows (big numerals) whenever the pane has 10+ rows,
-  // and metrics wrap into columns or are trimmed before it shrinks further.
-  const barMin = height >= 10 ? 5 : 1;
-  const room = Math.max(0, height - barMin - 1);
-  const maxCols = Math.max(1, Math.floor((width + 1) / 21));
-  let cols = 1;
-  let cw = width;
-  let below = metrics(data, cw, color);
-  for (let n = 2; n <= maxCols && Math.ceil(below.length / (n - 1)) > room; n++) {
-    cols = n;
-    cw = Math.floor((width - (n - 1)) / n);
-    below = metrics(data, cw, color);
-  }
-  const per = Math.ceil(below.length / cols);
-  const shown = Math.min(per, room);
-  const footer = [];
-  for (let r = 0; r < shown; r++) {
-    const cells = [];
-    for (let c = 0; c < cols; c++) cells.push(below[c * per + r] ?? ' '.repeat(cw));
-    footer.push(cells.join(' ') + ' '.repeat(width - cols * cw - (cols - 1)));
-  }
-  const gap = footer.length && height - footer.length >= 2 ? 1 : 0;
-  const barHeight = Math.min(Math.max(barMin, 9), height - footer.length - gap);
-  const pad = Array(height - footer.length - gap - barHeight).fill(' '.repeat(width));
-  return [...bar(data.plan, fc, width, barHeight, color), ...(gap ? [' '.repeat(width)] : []), ...footer, ...pad].join('\n');
-}
-
-function metrics(data, width, color) {
-  const paint = (code, text) => color ? `\x1b[38;2;${code}m${text}\x1b[0m` : text;
-  const row = (label, value, tone = INK, labelTone = DIM) => {
-    value = value.slice(0, width - 1);
-    label = label.slice(0, Math.max(1, width - value.length - 1));
-    return paint(labelTone, label) + ' '.repeat(width - label.length - value.length) + paint(tone, value);
+  const agents = data.agents ?? [];
+  const planW = cols <= 3 ? cols : Math.max(3, Math.round(cols * 0.55));
+  const agentRows = clamp(Math.ceil((agents.length + 2) / cellH), 1, rows);
+  const modules = [
+    { title: `PLAN ${planLabel(data.plan)}`, draw: planModule, shapes: [[planW, rows >= 3 ? 2 : 1], [planW, 1], [1, 1]] },
+    ...(data.errors?.length ? [{ title: 'SYS', draw: sysModule, shapes: [[2, 1], [1, 1]] }] : []),
+    { title: 'CYCLE', draw: cycleModule, shapes: [[2, 1], [1, 1]] },
+    { title: 'TODAY', draw: todayModule, shapes: [[2, 1], [1, 1]] },
+    ...(fc ? [{ title: 'FORECAST', draw: forecastModule, shapes: [[2, 2], [2, 1], [1, 2], [1, 1]] },
+      { title: 'MODEL·CTX', draw: modelModule, shapes: [[2, 1], [1, 1]] }] : []),
+    ...(agents.length ? [{ title: 'AGENTS', draw: agentsModule, shapes: [[2, agentRows], [2, 1], [1, agentRows], [1, 1]] }] : []),
+  ];
+  const used = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const free = (cx, cy, w, h) => {
+    for (let y = cy; y < cy + h; y++) for (let x = cx; x < cx + w; x++) if (y >= rows || x >= cols || used[y][x]) return false;
+    return true;
   };
-  const rule = (title) => paint(DIM, `${title} ${'─'.repeat(width)}`.slice(0, width));
-  const gauge = (value, prefix) => {
-    const cells = width - prefix.length;
-    const fill = Math.round(clamp(value || 0, 0, 100) / 100 * cells);
-    const tone = value >= 90 ? ALERT : value >= 75 ? AMBER : CALM;
-    return color ? paint(DIM, prefix) + `\x1b[38;2;${tone}m${'▆'.repeat(fill)}\x1b[38;2;${TRACK}m${'▆'.repeat(cells - fill)}\x1b[0m`
-      : prefix + '▆'.repeat(fill) + '·'.repeat(cells - fill);
+  const take = (cx, cy, w, h) => {
+    for (let y = cy; y < cy + h; y++) for (let x = cx; x < cx + w; x++) used[y][x] = true;
+    return { x: xs[cx], y: ys[cy], w: xs[cx + w] - xs[cx], h: ys[cy + h] - ys[cy] };
   };
-  const fc = data.forecast;
-  const below = (data.errors ?? []).map((e) => paint(ALERT, safeText(e).slice(0, width).padEnd(width)));
-  below.push(row('RESET', fc ? `${fc.daysToReset}d` : '--'),
-    row('PACE', percent(fc?.pace), fc && fc.used > fc.pace ? AMBER : CALM),
-    row('AIC', compact(data.today)));
-  if (data.remote !== undefined) below.push(row('UBU', data.remote === null ? 'off' : compact(data.remote.credits)));
-  if (fc) {
-    const peak = Math.max(...fc.trend, 1);
-    const spark = fc.trend.slice(-width).map((v) => v > 0 ? SPARK[Math.min(7, Math.floor(v / peak * 8))] : '·').join('');
-    const over = fc.overshoot;
-    below.push(rule('FORECAST'), paint(gradient(0.5), spark.padStart(width)),
-      row('PROJ', percent(fc.projected), !finite(fc.projected) ? INK : fc.projected > 100 ? ALERT : fc.projected > fc.target ? AMBER : CALM),
-      row('TGT', percent(fc.target)),
-      row(finite(over) && over > 0 ? 'OVER' : 'UNDER', finite(over) ? `${over > 0 ? '+' : ''}${Math.round(over)}%` : '--',
-        finite(over) && over > 0 ? ALERT : CALM),
-      row('CAP', fc.capAt ? new Date(fc.capAt).toISOString().slice(5, 10) : 'none', fc.capAt ? ALERT : INK),
-      row('DAY', compact(fc.dailyTarget), finite(fc.burn) && finite(fc.dailyTarget) && fc.burn > fc.dailyTarget ? AMBER : INK),
-      row('BURN', compact(fc.burn)),
-      row('MIX', `x${fc.mix.toFixed(1)}`, fc.mix > 1.2 ? AMBER : INK),
-      row('CTX', `${fc.grade} ${percent(finite(fc.cache) ? fc.cache * 100 : null)}`,
-        fc.grade === 'C' ? ALERT : fc.grade === 'B' ? AMBER : CALM));
+  const find = (w, h) => {
+    for (let cy = 0; cy <= rows - h; cy++) for (let cx = 0; cx <= cols - w; cx++) if (free(cx, cy, w, h)) return [cx, cy];
+    return null;
+  };
+  for (const module of modules) {
+    for (const [w, h] of module.shapes) {
+      const spot = w <= cols && h <= rows ? find(w, h) : null;
+      if (!spot) continue;
+      const box = take(spot[0], spot[1], w, h);
+      module.draw(cv, frame(cv, box, module.title), data);
+      break;
+    }
   }
-  if (data.agents?.length) below.push(rule('AGENTS'));
-  for (const a of data.agents ?? []) {
-    below.push(row((a.ubuntu ? 'u ' : '') + safeText(a.label), percent(a.context), INK, a.ubuntu ? UBUNTU : DIM));
-    const tag = a.model ? `${shortModel(a.model).slice(0, 7)}${a.effort ? `·${a.effort[0]}` : ''} ` : '';
-    below.push(gauge(a.context, tag.length <= width - 3 ? tag : ''));
+  let previous = -1;
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      if (used[cy][cx]) continue;
+      const seed = hash(cx, cy);
+      const w = seed % 3 && free(cx + 1, cy, 1, 1) ? 2 : 1;
+      let kind = seed % ART.length;
+      if (kind === previous) kind = (kind + 1) % ART.length;
+      previous = kind;
+      const box = take(cx, cy, w, 1);
+      artModule(cv, frame(cv, box, ART[kind], true), ART[kind], seed % 97, now);
+    }
   }
-  return below;
+  return cv.toString();
 }
 
 // ---------- collection ----------

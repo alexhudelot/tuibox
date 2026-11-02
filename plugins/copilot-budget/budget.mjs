@@ -840,22 +840,40 @@ async function main() {
   if (args.includes('--json')) return console.log(JSON.stringify(await collect(telemetry), null, 2));
   const interactive = process.stdout.isTTY && !args.includes('--once');
   let data = { plan: null, agents: [], errors: ['loading'] };
+  // Every draw re-packs the grid from the current size; a size change also clears the screen.
+  let drawnSize = '';
+  // columns/rows are cached until SIGWINCH, which ConPTY hosts do not always deliver;
+  // _refreshSize() re-queries the console handle (and emits 'resize' when it changed).
+  const size = () => {
+    try {
+      process.stdout._refreshSize?.();
+    } catch {
+      // Not a TTY.
+    }
+    return [process.stdout.columns || 20, process.stdout.rows || 40];
+  };
   const draw = () => {
-    const view = render(data, process.stdout.columns || 20, process.stdout.rows || 40, Date.now(),
-      { color: interactive && !Object.hasOwn(process.env, 'NO_COLOR') });
-    process.stdout.write(interactive ? `\x1b[H${view.split('\n').join('\x1b[K\r\n')}\x1b[J` : `${view}\n`);
+    const [width, height] = size();
+    const view = render(data, width, height, Date.now(), { color: interactive && !Object.hasOwn(process.env, 'NO_COLOR') });
+    if (!interactive) return process.stdout.write(`${view}\n`);
+    const clear = `${width}x${height}` !== drawnSize ? '\x1b[2J' : '';
+    drawnSize = `${width}x${height}`;
+    process.stdout.write(`${clear}\x1b[H${view.split('\n').join('\x1b[K\r\n')}\x1b[J`);
   };
   if (interactive) {
     process.stdout.write('\x1b[?1049h\x1b[?25l');
     process.once('exit', () => process.stdout.write('\x1b[0m\x1b[?25h\x1b[?1049l'));
     process.once('SIGINT', () => process.exit(0));
     process.once('SIGTERM', () => process.exit(0));
-    process.stdout.on('resize', draw);
+    let pending = null;
+    const redraw = () => {
+      clearTimeout(pending);
+      pending = globalThis.setTimeout(draw, 50);
+    };
+    process.stdout.on('resize', redraw);
     // ConPTY/tmux-style hosts do not always signal resizes, so poll the size as well.
-    let size = '';
     setInterval(() => {
-      const next = `${process.stdout.columns}x${process.stdout.rows}`;
-      if (next !== size) { size = next; draw(); }
+      if (size().join('x') !== drawnSize) redraw();
     }, 250).unref();
   }
   do {

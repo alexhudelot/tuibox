@@ -1,7 +1,7 @@
 id = "copilot-budget"
 name = "Copilot budget"
-version = "0.1.0"
-description = "Narrow pane for GitHub Copilot CLI plan usage: % bar with pace and projection markers, today's AIC, monthly forecast (projection, cap ETA, daily target, overshoot) weighted by live models, effort and context, plus per-agent context gauges."
+version = "0.2.0"
+description = "Narrow pane for GitHub Copilot CLI plan usage: % bar with pace and projection markers, today's AIC, monthly forecast (projection, cap ETA, daily target, overshoot) weighted by live models, effort and context, risk status (OK/WATCH/RISK), clock, Jira sprint tickets (read-only via twg) and per-agent context gauges, packed into a resize-aware synth-rack grid."
 platforms = ["linux", "macos", "windows"]
 
 [[panes]]
@@ -15,3 +15,9 @@ id = "snapshot"
 title = "Copilot budget snapshot"
 description = "Print the current plan usage and forecast as JSON."
 command = ["node", "--no-warnings", "budget.mjs", "--json"]
+
+[[actions]]
+id = "dock"
+title = "Copilot budget dock line"
+description = "Print a one-line status for dock cells, e.g. 'AIC 13% →238% RISK'."
+command = ["node", "--no-warnings", "budget.mjs", "--dock"]

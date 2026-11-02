@@ -18,6 +18,9 @@ Jira data is read-only via `twg jira workitem query` (JQL: assignee = currentUse
 
 Install: `tuios plugins install alexhudelot/tuibox/plugins/copilot-budget` (manual start: `node --no-warnings budget.mjs`).
 
-Env: `BUDGET_TARGET` (default 100), `BUDGET_REMOTE` (remote dock JSON), `BUDGET_REFRESH_MS`, `BUDGET_JIRA=0` (disable Jira), `TWG_BIN`, `COPILOT_HOME`, `NO_COLOR`. Flags: `--json`, `--once`.
+Settings: `~/.copilot/copilot-budget.json` (or `BUDGET_CONFIG`), keys `remote`, `target`, `jira`, `refreshMs`, `session`, `export`; the matching env vars override: `BUDGET_REMOTE` (remote dock JSON), `BUDGET_TARGET` (default 100), `BUDGET_REFRESH_MS`, `BUDGET_JIRA=0` (disable Jira), `TUIOS_SESSION`, `BUDGET_EXPORT` (write a JSON snapshot each refresh). Also `TWG_BIN`, `COPILOT_HOME`, `NO_COLOR`. Flags: `--json`, `--dock` (one line, e.g. `AIC 13% →238% RISK`), `--once`.
 
-Tests: `node --no-warnings --test` (full 1..200 x 1..80 render sweep takes ~1 min).
+Start: `start.ps1` (Windows, Ctrl+C stops) or `start.sh` (Node if present, else `python3 budget.py`). `budget.py` (stdlib only) renders the exported snapshot for hosts without Node such as the Ubuntu container: `python3 budget.py [--once] [--dock] [--file /shared/sherpa/budget.json]`; it shows `snapshot: stale` after 3 min and `off` when the file is missing. Times follow the host TZ (set `TZ` in the container).
+
+Tests: `node --test` (coarse render sweep; `BUDGET_FULL_SWEEP=1` for every size 1..200×1..80) and `python3 -m unittest test_budget`.
+

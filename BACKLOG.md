@@ -25,6 +25,10 @@ Ids are `TB-nnn`. Each item lists acceptance criteria (AC).
 
 Out of scope: Lucid diagrams and other non-tuibox work.
 
+## Later (styles)
+
+- **TB-074** udget.py (Ubuntu) style parity: only synth-rack-like view in the container.
+
 ## Done
 
 - **TB-060** Theme package format `themes/<name>/` (manifest + Windows/Ubuntu tuios themes), validator with WCAG contrast checks (body ≥ 7:1, dim ≥ 4.5:1), Windows/Ubuntu distinguishability check (36cc082).
@@ -32,6 +36,10 @@ Out of scope: Lucid diagrams and other non-tuibox work.
 - **TB-062** New themes nocturne, ember, mono with Ubuntu variants; all pass contrast (c1b12a0).
 - **TB-063** `themes/apply.ps1`: tuios theme + borders (nord→theme reload), WT schemes (backup, `Tuibox <Name>` names so the user's own "Nocturne" scheme isn't clobbered), panel setting, container via `apply.sh` (488b465).
 - **TB-064** `themes/apply.sh` for the container + `budget.py` palette.json (live re-read); tests (488b465).
+- **TB-070** Panel style system: `style` setting / `BUDGET_STYLE` (synth-rack default), switched live on next refresh; styles independent of palettes; shared data/packing helpers, tiny fallback shared, RISK at every size; style × palette sweep tests.
+- **TB-071** Style `cockpit`: semicircle block gauges (PLAN, pace), horizon trend tape, OK/WATCH/RISK annunciators, no art.
+- **TB-072** Style `ledger`: rules, right-aligned USED/PACE/PROJ/CAP/TODAY/BURN table, sparkline row, Jira list; no boxes.
+- **TB-073** Style `blueprint`: thin frames, dimension lines `├── 238% ──┤`, dot-grid filler, bottom-right title block (date, reset, grade).
 - **TB-065** Live demo 2026-11-02: nocturne → ember → mono → zen applied to sherpa + ubuntu; PLAN capture showed each panel background (#0B1020, #161311, #0A0A0A, #061214) without restarting the pane; zen restored, portrait layout restored (PLAN 32x69).
 
 - **TB-040 / TB-021 / TB-022** Stoppable launchers `start.ps1` (Ctrl+C stops, no restart loop) and `start.sh` (Node, else Python); settings file `~/.copilot/copilot-budget.json` with env overrides; the live PLAN pane runs via `start.ps1` from the worktree (f5fc0ba). Plugin link/enable is a user action (TB-040b).

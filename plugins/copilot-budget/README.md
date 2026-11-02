@@ -24,3 +24,8 @@ Start: `start.ps1` (Windows, Ctrl+C stops) or `start.sh` (Node if present, else 
 
 Tests: `node --test` (coarse render sweep; `BUDGET_FULL_SWEEP=1` for every size 1..200×1..80) and `python3 -m unittest test_budget`.
 
+
+## Styles
+
+Set `"style"` in `~/.copilot/copilot-budget.json` (or `BUDGET_STYLE`): `synth-rack` (default), `cockpit` (gauges, horizon tape, annunciators), `ledger` (right-aligned table, no boxes - best for narrow panes), `blueprint` (thin frames, dimension lines, title block). Changes apply on the next refresh; styles work with every theme palette.
+

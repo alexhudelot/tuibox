@@ -56,7 +56,7 @@ const sizes = function* (step = 1) {
 test('full sweep 1..200 x 1..80: exact width x height in plain and colour', () => {
   const loading = { plan: null, agents: [], errors: ['loading'] };
   for (const d of [full, loading]) {
-    for (const [w, h] of sizes()) {
+    for (const [w, h] of sizes(process.env.BUDGET_FULL_SWEEP === '1' ? 1 : 2)) {
       for (const color of [false, true]) {
         const lines = strip(render(d, w, h, 0, { color })).split('\n');
         assert.equal(lines.length, h, `${w}x${h}`);

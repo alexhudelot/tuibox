@@ -4,61 +4,38 @@ Ids are `TB-nnn`. Each item lists acceptance criteria (AC).
 
 ## Now
 
-_(empty: the Now items of 2026-11-02 shipped, see Done)_
+- **TB-050 / TB-031 Push to GitHub** (chore, blocked: auth). Non-interactive attempt on 2026-11-02 (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, 30 s) timed out; `gh` isn't installed.
+  User steps (outside tuios, interactive): `winget install GitHub.cli`, `gh auth login` (HTTPS, browser), `gh auth setup-git`, then in `C:\GHCP-Root\tuibox`: `git push origin main tuibox-agent`. Alternative: create a fine-grained PAT (Contents: read/write on alexhudelot/tuibox) and enter it once at the Git Credential Manager prompt of a plain `git push`.
+  AC: `main` and `tuibox-agent` are on GitHub.
+- **TB-040b Enable copilot-budget as a tuios plugin** (user action). `tuios plugins link/enable` refuse to run inside a tuios pane (security guard, not bypassed). Run from a terminal outside tuios: `tuios plugins link C:\GHCP-Root\tuibox\plugins\copilot-budget`, `tuios plugins enable copilot-budget`, `tuios plugins open copilot-budget budget`.
+  AC: the PLAN pane is opened by the plugin; `start.ps1` stays as the manual fallback.
 
 ## Next
 
-- **TB-020 Replace the `_refreshSize()` resize hack** (fix). The overview panel calls Node's private `process.stdout._refreshSize()` every 250 ms because ConPTY doesn't always send SIGWINCH.
-  AC: no private Node API is used; resizes under tuios (Windows ConPTY and Linux) re-pack within 500 ms; there's a test for the size-source abstraction. Options: use `process.stdout.getWindowSize()` on a timer, or have tuios publish the size to the plugin.
-- **TB-021 PLAN pane runs an unbreakable restart loop on the main-tree copy** (fix). Neither ctrl+c nor killing node stops the pane's PowerShell loop (`C:/GHCP-Root/tuibox/plugins/copilot-budget/budget.mjs` keeps coming back), so you can't switch to the worktree build in place.
-  AC: the pane is started through the plugin manifest (TB-022) or a documented launcher that ctrl+c stops; the live check can target the PLAN pane.
-- **TB-022 Install and enable the plugin with `tuios plugins link/install`** (improvement). Replaces the manual pane start.
-  AC: `tuios plugins link plugins/copilot-budget` (dev) and `install` (release) open the budget pane with env (`TUIOS_SESSION`, `BUDGET_REMOTE`) from config; the README shows both.
-- **TB-023 Restore the sherpa layout after live checks** (fix). Partly superseded by TB-017's portrait layout. The temporary BUDGETTEST window changed the tiling (left column went from 82 to 140 columns, UBUNTU-TUIOS from 122 to 85). The user's preferred layout has PLAN about 66 wide under SHERPA on the left and UBUNTU-TUIOS on the right.
-  AC: a scripted, reversible way to set and restore split ratios (for example, a saved layout); after any live test the layout matches the one before it.
-- **TB-024 README and install.sh for the current setup** (fix). The README still describes WSL2 + Claude Code.
-  AC: the README covers the Windows `sherpa` session, the Ubuntu container session, docks, WT schemes and the copilot-budget plugin; `install.sh`, plus a `install.ps1` for Windows, installs themes and config and links the plugin; `claude-week.sh` is marked legacy or replaced.
+- **TB-047 Jira extras** (improvement, partly blocked). Sprint name: twg returns `customfield_10020` as null, so the title stays "JIRA" (needs a twg board/sprint command or a field fix upstream). OSC 8 hyperlinks on keys: deferred, the cell canvas has no zero-width escape support yet and tuios' OSC 8 pass-through is unverified. Priority glyph: deferred with OSC 8.
+  AC: `JIRA · <sprint>` title; clickable keys in tuios; priority glyph; tests.
+- **TB-051 Container clock TZ** (fix, S). `budget.py` in the container shows UTC (container TZ). AC: `TZ=Europe/Paris` set in the container tuios wrapper or the snapshot carries the Windows offset.
+- **TB-052 Ubuntu dock uses copilot-budget.sh** (improvement, S). Script and install are in the repo; the live container config still has its old dock. AC: container `config.toml` dock cell runs `/workspace/tools/copilot-budget/start.sh --dock` (back up config first).
 
 ## Later
 
-- **TB-030 Ubuntu port of the overview panel** (improvement). The container has no Node.
-  AC: decide between a Python port, a bundled single-file Node binary (SEA) or running the panel on Windows against the shared JSON; the panel renders in the `ubuntu` session with amber accents.
-- **TB-031 Push to GitHub** (chore). GitHub auth isn't configured on this machine.
-  AC: credentials are configured (gh auth or a PAT in the credential manager); `tuibox-agent` and `main` are pushed to `alexhudelot/tuibox`.
-- **TB-032 Merge tuibox-agent into main** (chore). Do this only when asked.
-  AC: fast-forward or merge commit; tests pass on main; the PLAN pane runs from main again.
-- **TB-033 Jira sprint name** (improvement). twg's query doesn't return `customfield_10020`, so the title is just "JIRA".
-  AC: the active sprint name is resolved (for example via a board/sprint query) and shown as `JIRA · <sprint>`.
-- **TB-034 Remaining review findings** (fix, low).
-  - TODAY uses local midnight while daily history buckets are UTC.
-  - FORECAST's labels truncate to `PRO` on 1-cell-wide modules; the values stay intact.
-  - `kvGrid` silently drops items that don't fit.
-  - The full 1..200×1..80 sweep takes about 60 s; it could be moved behind an env flag.
-  AC: each one is fixed or explicitly accepted.
+- **TB-053 Amber accents for the Ubuntu renderer** (improvement, S). `budget.py` uses the teal palette; the Ubuntu theme is blue-teal. AC: palette follows the session theme.
 
 Out of scope: Lucid diagrams and other non-tuibox work.
 
-## Proposed (awaiting approval)
-
-Don't implement these until approved. Effort: S/M/L. Risk: L/M/H.
-
-| Id | Type | Title | Why / value | Effort | Risk |
-|---|---|---|---|---|---|
-| TB-040 | fix | Launch the PLAN pane via the plugin manifest + stoppable launcher (merges TB-021/TB-022) | Live checks and upgrades can't currently be done in place | M | M |
-| TB-041 | improvement | Saved `sherpa` layout preset (PLAN ~66 under SHERPA, UBUNTU-TUIOS right) + restore script | Layout drifts after tests and window churn; one-command restore | S | L |
-| TB-042 | fix | Replace the `_refreshSize` polling with a supported size source (TB-020) | Private API may break on a Node upgrade | S | M |
-| TB-043 | fix | Rewrite the README and add `install.ps1`; `install.sh` installs the plugin (TB-024) | Docs describe a WSL2/Claude setup that no longer exists | M | L |
-| TB-044 | improvement | Ubuntu session theme parity: amber gradient theme file + WT scheme in the repo | Ubuntu styling currently lives only in the container | S | L |
-| TB-045 | improvement | Ubuntu panel via shared JSON (Windows renders, Ubuntu displays) or a Python port (TB-030) | No Node in the container | L | M |
-| TB-046 | improvement | Packaging: bump the plugin version, add a CHANGELOG, `tuios plugins install` from a tag | Reproducible installs | S | L |
-| TB-047 | improvement | Jira module: sprint name (TB-033), hyperlink keys (OSC 8), priority glyph | More useful at a glance | S | L |
-| TB-048 | fix | Speed up tests: share render results, gate the full sweep behind `BUDGET_FULL_SWEEP=1` | The suite takes about 60 s | S | L |
-| TB-049 | improvement | Dock cell for the Copilot budget (replaces `claude-week.sh`) | The dock still shows Claude usage | M | L |
-| TB-050 | chore | Configure GitHub auth and push; then merge to main on request (TB-031/032) | Work is only local | S | M |
-
-Recommended Now set (5 items): **TB-040, TB-041, TB-042, TB-043, TB-048**.
-
 ## Done
+
+- **TB-040 / TB-021 / TB-022** Stoppable launchers `start.ps1` (Ctrl+C stops, no restart loop) and `start.sh` (Node, else Python); settings file `~/.copilot/copilot-budget.json` with env overrides; the live PLAN pane runs via `start.ps1` from the worktree (f5fc0ba). Plugin link/enable is a user action (TB-040b).
+- **TB-041 / TB-023** `tuios/layouts/sherpa-portrait.ps1` restores SHERPA | UBUNTU-TUIOS | PLAN (PLAN grown until ≥32 cols). Live: SHERPA 46x69, UBUNTU-TUIOS 76x69, PLAN 32x69 (afd52f4). The earlier "PLAN ~66 under SHERPA" layout is superseded by the portrait request.
+- **TB-042 / TB-020** `sizeSource()`: resize events plus feature-detected `_refreshSize` polling isolated in one place, degrading to events if it throws; tests (f5fc0ba). The private API is still used when present (ConPTY needs it) but can no longer crash the panel.
+- **TB-043 / TB-024** README for Windows sherpa + Ubuntu container, docks, WT schemes, plugin; `install.ps1`; `install.sh --ubuntu` installs the variant theme/config, both dock scripts and the plugin; `.gitattributes` keeps `.sh`/`.py` LF (9ff6d04, 3bb5d9f).
+- **TB-044** Live Windows and Ubuntu container themes/configs synced into the repo (`themes/ubuntu/zen.json`, `ubuntu-config.toml`); WT schemes `Zen` and `Zen Ubuntu` generated from them (3b11eb5, 9ff6d04).
+- **TB-045 / TB-030** Ubuntu panel: the Windows panel writes an atomic JSON snapshot (`export` → `/shared/sherpa/budget.json`); `budget.py` (stdlib, no telemetry/network) renders it with stale/off states, `--dock`, `--once`. Chosen over a full Python port (duplicate telemetry/forecast logic) and a bundled Node binary (rootfs read-only, ~100 MB). Deployed to `/workspace/tools/copilot-budget` (previous dir would be backed up `.bak-<date>`). 4 Python tests (cedcbcc).
+- **TB-046** Plugin 0.2.0: manifest description, `dock` action, CHANGELOG (b3fa677).
+- **TB-048** Full 1-px sweep opt-in with `BUDGET_FULL_SWEEP=1`; default sweeps every 2nd size (ca8d9e2).
+- **TB-049** `budget.mjs --dock` / `budget.py --dock` one-liner (`AIC 13% →238% RISK`) and `tuios/dock/copilot-budget.sh`; test (cedcbcc).
+- **TB-034** Review findings accepted: TODAY local midnight vs UTC buckets (intended: "today" is the user's day; forecast uses UTC history consistently); FORECAST labels truncating on 1-cell modules (values never clipped, tested); `kvGrid` dropping items that don't fit (by design, priority order); sweep time fixed by TB-048.
+- **TB-032** Merge tuibox-agent → main in `C:\GHCP-Root\tuibox` (see final commit log).
 
 - **TB-017** Portrait overview panel (2026-11-02): PLAN was recreated as a full-height right-edge column with `split-window right -w UBUNTU-TUIOS --name PLAN`, then sized with `resize_width_10` plus 3× `resize_master_grow` (4 cols each). The panel restarted from the worktree, which also removed the old restart loop. Layout: SHERPA 67x69 | UBUNTU-TUIOS 123x69 | PLAN 34x69. In portrait, TREND gets 2 cells so the big projection and sparkline fit.
   AC: portrait test (PLAN → TREND → CLOCK order, sparkline shown); live capture verified.

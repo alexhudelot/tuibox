@@ -1,0 +1,42 @@
+{
+  "name": "nocturne",
+  "description": "Deep ink blue with silver/ice accents. Ubuntu: violet-ink background, warm gold borders.",
+  "windows": {
+    "tuios": "windows.json",
+    "wtScheme": "Nocturne",
+    "borders": {
+      "border_focused_gradient": "#1d2a4a #3e5a8c #a9c7ff",
+      "border_unfocused_color": "#24304d"
+    }
+  },
+  "ubuntu": {
+    "tuios": "ubuntu.json",
+    "wtScheme": "Nocturne Ubuntu",
+    "borders": {
+      "border_focused_gradient": "#5a3a1e #b07a3e #f0c890",
+      "border_unfocused_color": "#3e2e38"
+    }
+  },
+  "panel": {
+    "gradient": [
+      "#1D2A4A",
+      "#3E5A8C",
+      "#6F92CC",
+      "#A9C7FF",
+      "#E3EDFF"
+    ],
+    "slate": [
+      "#23262E",
+      "#737884"
+    ],
+    "bg": "#0B1020",
+    "track": "#22283A",
+    "rule": "#1E2740",
+    "ink": "#F2F5FA",
+    "inkOnFill": "#0B1020",
+    "dim": "#8C9AB8",
+    "watch": "#E8C77A",
+    "risk": "#F28C78",
+    "ubuntu": "#D9A066"
+  }
+}

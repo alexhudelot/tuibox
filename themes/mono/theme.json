@@ -1,0 +1,42 @@
+{
+  "name": "mono",
+  "description": "Black/white/greys, blueprint-like (matches the B&W HTML). Ubuntu: warm sepia borders and paper-black background.",
+  "windows": {
+    "tuios": "windows.json",
+    "wtScheme": "Mono",
+    "borders": {
+      "border_focused_gradient": "#3a3a3a #8a8a8a #e8e8e8",
+      "border_unfocused_color": "#2e2e2e"
+    }
+  },
+  "ubuntu": {
+    "tuios": "ubuntu.json",
+    "wtScheme": "Mono Ubuntu",
+    "borders": {
+      "border_focused_gradient": "#4a3a28 #9a7a50 #e8d4b0",
+      "border_unfocused_color": "#3a3026"
+    }
+  },
+  "panel": {
+    "gradient": [
+      "#3A3A3A",
+      "#6A6A6A",
+      "#9A9A9A",
+      "#C8C8C8",
+      "#F4F4F4"
+    ],
+    "slate": [
+      "#1E1E1E",
+      "#5A5A5A"
+    ],
+    "bg": "#0A0A0A",
+    "track": "#262626",
+    "rule": "#202020",
+    "ink": "#FFFFFF",
+    "inkOnFill": "#0A0A0A",
+    "dim": "#9A9A9A",
+    "watch": "#E0C060",
+    "risk": "#F28C78",
+    "ubuntu": "#C8B08A"
+  }
+}

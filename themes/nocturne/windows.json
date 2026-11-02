@@ -1,0 +1,34 @@
+{
+  "id": "nocturne",
+  "dark": true,
+  "fg": "#E6ECF5",
+  "bg": "#0B1020",
+  "cursor": "#A9C7FF",
+  "black": "#1A2238",
+  "red": "#F09A9A",
+  "green": "#9FD8B0",
+  "yellow": "#E8D7A0",
+  "blue": "#7FA7E8",
+  "purple": "#B9A8F0",
+  "cyan": "#8FD0E8",
+  "white": "#C9D3E3",
+  "bright_black": "#8C9AB8",
+  "bright_red": "#FFB4B4",
+  "bright_green": "#B8EBC6",
+  "bright_yellow": "#F5E6B8",
+  "bright_blue": "#A9C7FF",
+  "bright_purple": "#D2C6FA",
+  "bright_cyan": "#B5E3F2",
+  "bright_white": "#FFFFFF",
+  "chrome": {
+    "accent": "cyan",
+    "border": {
+      "unfocused": "bright_black"
+    },
+    "dots": {
+      "close": "blue",
+      "minimize": "cyan",
+      "zoom": "bright_cyan"
+    }
+  }
+}

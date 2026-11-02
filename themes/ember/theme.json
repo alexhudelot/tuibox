@@ -1,0 +1,42 @@
+{
+  "name": "ember",
+  "description": "Warm charcoal with copper accents. Ubuntu: redder ember background, flame-orange borders.",
+  "windows": {
+    "tuios": "windows.json",
+    "wtScheme": "Ember",
+    "borders": {
+      "border_focused_gradient": "#3a2a20 #8a5a3a #d9a070",
+      "border_unfocused_color": "#3a2c24"
+    }
+  },
+  "ubuntu": {
+    "tuios": "ubuntu.json",
+    "wtScheme": "Ember Ubuntu",
+    "borders": {
+      "border_focused_gradient": "#5a2a10 #c8601e #ffb070",
+      "border_unfocused_color": "#4a2618"
+    }
+  },
+  "panel": {
+    "gradient": [
+      "#4A2E1E",
+      "#8A5232",
+      "#C07A48",
+      "#E0A870",
+      "#F6D8B0"
+    ],
+    "slate": [
+      "#2A2624",
+      "#7E7672"
+    ],
+    "bg": "#161311",
+    "track": "#2E2723",
+    "rule": "#2A211C",
+    "ink": "#FFF6EA",
+    "inkOnFill": "#161311",
+    "dim": "#A89888",
+    "watch": "#F0D070",
+    "risk": "#FF7A7A",
+    "ubuntu": "#E0A870"
+  }
+}

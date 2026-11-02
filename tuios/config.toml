@@ -1,7 +1,7 @@
 # TUIOS Configuration File
 # This file allows you to customize appearance and keybindings
 #
-# Configuration location: ~/.config/tuios/config.toml
+# Configuration location: C:\Users\U002443\AppData\Local\tuios\config.toml
 # Documentation: https://github.com/Gaurav-Gosain/tuios
 # For keybindings documentation, run: tuios keybinds list
 #
@@ -120,44 +120,53 @@
 tiled = true
 daemon = true
 
-[agents]
-enabled = true
-
-[appearance.sidebar.left]
-enabled = true
-
 [appearance]
+dim_foreground = false
 theme = "zen"
-border_style = "rounded"
-window_title_style = "pill"
-window_title_position = "top"
-shared_borders = false
-border_focused_gradient = "#2f7f7a #6cc4b4 #8ddccb"
-border_gradient_angle = 45
-dock_compact = true
-hide_window_buttons = true
-frame_panels = false
+background = "theme"
 gap = 0
-dim_unfocused = 33
-background = "off"
-zen_mode = "disabled"
-session_border = false
-dockbar_position = "bottom"
-show_clock = true
-show_cpu = true
-show_ram = true
+shared_borders = true
+dock_workspace_tabs = false
+panel_padding = 1
+border_focused_gradient = "#134e4a #2f7f78 #6fb7ad"
+border_style = "normal"
+window_title_style = "plain"
+hide_scrollbar = false
+border_unfocused_color = "#1f4a46"
+
+[appearance.sidebar]
+enabled = false
+position = "hidden"
+
+[appearance.selection]
+bg = "#1F4A4A"
+fg = "fg"
+cursor_bg = "green"
+cursor_fg = "bg"
+flash_color = "cyan"
+search_bg = "yellow"
+search_fg = "bg"
+match_bg = "green"
+match_fg = "bg"
+
+[dock]
+right = ["custom/copilot", "custom/ubuntu", "transfers", "notifications", "copy-help", "cpu", "ram", "clock", "session-controls"]
+
+[dock.custom.copilot]
+command = 'TUIOS_SESSION=sherpa C:/Users/U002443/.vfox/sdks/nodejs/node.exe --no-warnings C:/GHCP-Root/agents/sherpa/overview.mjs --dock'
+refresh = "60s"
+max-width = 80
+fg = "bg"
+bg = "cyan"
+bold = true
+
+[dock.custom.ubuntu]
+command = 'C:/Users/U002443/.vfox/sdks/nodejs/node.exe --no-warnings C:/GHCP-Root/agents/sherpa/overview.mjs --remote C:/GHCP-Root/Ubuntu-Shared/sherpa/ubuntu-dock.json'
+refresh = "30s"
+max-width = 80
+fg = "bg"
+bg = "magenta"
+bold = true
 
 [spotlight]
 enabled = false
-
-[appearance.sidebar]
-enabled = true
-position = "right"
-header_case = "lowercase"
-
-[appearance.sidebar.right]
-enabled = true
-
-[daemon]
-# after a daemon/WSL restart, type claude --resume into each agent pane
-resume_agents = "auto"

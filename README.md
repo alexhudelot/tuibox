@@ -1,54 +1,76 @@
 # tuibox
 
-My [tuios](https://github.com/Gaurav-Gosain/tuios) setup for running Claude Code agents in WSL2, plus a matching Windows Terminal colour scheme.
+My [tuios](https://github.com/Gaurav-Gosain/tuios) setup for running GitHub Copilot CLI agents on Windows (session `sherpa`) and in an Ubuntu 24.04 container (`ghcp-ubuntu-agent`), with matching Windows Terminal colour schemes and a Copilot budget overview pane.
 
-- **Zen theme**: a muted moss-and-teal dark palette, used by both tuios and Windows Terminal.
-- **Layout**: tiled windows, rounded borders with a teal gradient on the focused one, pill titles, dimmed unfocused panes, compact bottom dock with clock/CPU/RAM.
-- **Agents**: agent detection on, left and right sidebars.
-- **Autostart**: a systemd user service runs the tuios daemon at boot, and `resume_agents = "auto"` types `claude --resume <session>` back into each agent pane, so agents come back after a WSL or machine restart.
+- **Zen theme**: muted teal dark palette. Windows uses `themes/zen.json`; the Ubuntu container uses a bluer variant `themes/ubuntu/zen.json` so the two sessions are told apart at a glance.
+- **Layout**: tiled windows, rounded borders, teal gradient on the focused pane, compact bottom dock. Windows `sherpa` portrait preset: SHERPA | UBUNTU-TUIOS (largest) | PLAN (~32 cols, full height) — `tuios/layouts/sherpa-portrait.ps1` restores it.
+- **Overview pane**: [copilot-budget](plugins/copilot-budget/README.md) — plan %, risk (OK/WATCH/RISK), projection, clock, Jira sprint tickets, agent context.
+- **Docks**: `dock/copilot-budget.sh` (`AIC 13% →238% RISK`); `dock/claude-week.sh` kept for Claude Code users.
 
-Tested with tuios 0.11.1 on Ubuntu 24.04 (WSL2).
+Tested with tuios 0.11.1 on Windows 11 and Ubuntu 24.04.
 
 ## Layout
 
 ```
 tuios/
-  config.toml            main config (~/.config/tuios/config.toml)
-  themes/zen.json        tuios theme
-  dock/claude-week.sh    dock cell showing Claude weekly limit usage
-  systemd/tuios.service  user service for the daemon
+  config.toml              Windows config (%LOCALAPPDATA%\tuios\config.toml)
+  ubuntu-config.toml       container config (/workspace/tools/tuios/config/tuios/config.toml)
+  themes/zen.json          Windows theme
+  themes/ubuntu/zen.json   Ubuntu container theme
+  dock/copilot-budget.sh   dock cell: Copilot plan usage / projection / risk
+  dock/claude-week.sh      dock cell: Claude weekly limit (legacy)
+  layouts/sherpa-portrait.ps1  restore the portrait PLAN layout in session sherpa
+  systemd/tuios.service    user service for the daemon (Linux/WSL)
 windows-terminal/
-  zen-scheme.json        colour scheme, paste into "schemes"
-  profile-defaults.json  profile defaults (scheme, acrylic, opacity)
-install.sh
+  zen-scheme.json          Windows session scheme ("Zen")
+  zen-ubuntu-scheme.json   Ubuntu session scheme ("Zen Ubuntu")
+  profile-defaults.json    profile defaults (scheme, acrylic, opacity)
+plugins/copilot-budget/    overview pane (Node >= 22.5; Python fallback renderer)
+install.ps1                Windows install
+install.sh                 Linux / container install
 ```
 
 ## Install
 
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/alexhudelot/tuibox; cd tuibox
+./install.ps1        # config, theme, plugin config file; backs up existing files
+```
+
+Linux / Ubuntu container:
+
 ```bash
-git clone https://github.com/alexhudelot/tuibox && cd tuibox
-./install.sh               # config, theme, dock script
+./install.sh               # config, theme, dock scripts, copilot-budget (Python fallback)
+./install.sh --ubuntu      # use the Ubuntu theme/config variant
 ./install.sh --autostart   # also install and enable the systemd service
 ```
 
 Existing files are backed up as `*.bak-<timestamp>`.
 
-Autostart needs systemd in WSL (`[boot] systemd=true` in `/etc/wsl.conf`) and lingering (`loginctl enable-linger $USER`) so the user service runs without a login. If you start the daemon by hand instead, skip `--autostart`; `resume_agents` works either way.
+### Overview pane (copilot-budget)
 
-`resume_agents` accepts `ask` (tuios default), `auto` or `off`.
+Run it in a pane with `plugins/copilot-budget/start.ps1` (Windows) or `start.sh` (Linux: Node if present, else `budget.py`). Settings live in `~/.copilot/copilot-budget.json`, see the plugin README.
 
-### Dock cell
+As a tuios plugin — run **outside** a tuios pane (tuios refuses plugin changes from inside its own panes):
 
-`dock/claude-week.sh` reads `~/.cache/claude-weekly.json` (written by a Claude Code status-line script, not included) and prints `wk NN%`. It prints nothing if the file is missing, so it is harmless without it. Needs `jq`.
+```powershell
+tuios plugins link C:\path\to\tuibox\plugins\copilot-budget
+tuios plugins enable copilot-budget
+tuios plugins open copilot-budget budget
+```
+
+The Ubuntu container has no Node. The Windows pane writes a JSON snapshot (`"export": "C:/GHCP-Root/Ubuntu-Shared/sherpa/budget.json"`, i.e. `/shared/sherpa/budget.json` in the container) and `budget.py` renders/docks it with the Python standard library only.
 
 ### Windows Terminal
 
-Open Settings → Open JSON file, then:
+Settings → Open JSON file: add `windows-terminal/zen-scheme.json` and `zen-ubuntu-scheme.json` to `schemes`, merge `profile-defaults.json`, and set `"colorScheme": "Zen Ubuntu"` on the profile that attaches to the container.
 
-1. Add the object from `windows-terminal/zen-scheme.json` to the `schemes` array.
-2. Merge `windows-terminal/profile-defaults.json` into the top level (or just set `"colorScheme": "Zen"` on your WSL profile).
+### Autostart (Linux/WSL)
 
-## Plugins
+Needs systemd (`[boot] systemd=true` in `/etc/wsl.conf` under WSL) and `loginctl enable-linger $USER`. `resume_agents` accepts `ask`, `auto` or `off`.
 
-- [copilot-budget](plugins/copilot-budget/README.md): Copilot CLI plan usage and forecast pane.
+## Backlog
 
+See [BACKLOG.md](BACKLOG.md).

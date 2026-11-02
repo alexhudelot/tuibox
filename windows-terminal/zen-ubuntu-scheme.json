@@ -1,0 +1,23 @@
+{
+  "name": "Zen Ubuntu",
+  "background": "#091c25",
+  "foreground": "#F4FFFC",
+  "cursorColor": "#8FD3C9",
+  "selectionBackground": "#163440",
+  "black": "#163440",
+  "brightBlack": "#9CC4C0",
+  "red": "#f2998a",
+  "brightRed": "#ffb3a6",
+  "green": "#6FBF9F",
+  "brightGreen": "#9AD8BE",
+  "yellow": "#f0d98c",
+  "brightYellow": "#fbe7a8",
+  "blue": "#4F8FA3",
+  "brightBlue": "#7FB4C4",
+  "purple": "#b8a8f0",
+  "brightPurple": "#d0c4fa",
+  "cyan": "#5FB3AB",
+  "brightCyan": "#8FD3C9",
+  "white": "#d4e8e4",
+  "brightWhite": "#FFFFFF"
+}

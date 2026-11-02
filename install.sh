@@ -11,10 +11,20 @@ put() { # put <src> <dest>
   cp "$1" "$2"; echo "installed $2"
 }
 
-put "$here/tuios/config.toml"          "$cfg/tuios/config.toml"
-put "$here/tuios/themes/zen.json"      "$cfg/tuios/themes/zen.json"
-put "$here/tuios/dock/claude-week.sh"  "$cfg/tuios/dock/claude-week.sh"
-chmod +x "$cfg/tuios/dock/claude-week.sh"
+variant=""; [ "${1:-}" = "--ubuntu" ] && { variant="ubuntu"; shift; }
+if [ -n "$variant" ]; then
+  put "$here/tuios/ubuntu-config.toml"     "$cfg/tuios/config.toml"
+  put "$here/tuios/themes/ubuntu/zen.json" "$cfg/tuios/themes/zen.json"
+else
+  put "$here/tuios/config.toml"            "$cfg/tuios/config.toml"
+  put "$here/tuios/themes/zen.json"        "$cfg/tuios/themes/zen.json"
+fi
+for d in claude-week.sh copilot-budget.sh; do
+  put "$here/tuios/dock/$d" "$cfg/tuios/dock/$d"; chmod +x "$cfg/tuios/dock/$d"
+done
+dest="${COPILOT_BUDGET_DIR:-$HOME/.local/share/copilot-budget}"
+for f in budget.mjs budget.py start.sh herdr-plugin.toml; do put "$here/plugins/copilot-budget/$f" "$dest/$f"; done
+chmod +x "$dest/start.sh"
 
 if [ "${1:-}" = "--autostart" ]; then
   put "$here/tuios/systemd/tuios.service" "$cfg/systemd/user/tuios.service"

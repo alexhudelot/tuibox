@@ -19,11 +19,20 @@ Ids are `TB-nnn`. Each item lists acceptance criteria (AC).
 
 ## Later
 
+- **TB-066 Theme follow-ups** (improvement, S). install.ps1/install.sh still install from 	uios/themes (now duplicated by 	hemes/zen); switch them to 	hemes/apply.* and drop the duplicates. WT JSON comments are lost on apply (backup kept): consider a text-level upsert.
+
 - **TB-053 Amber accents for the Ubuntu renderer** (improvement, S). `budget.py` uses the teal palette; the Ubuntu theme is blue-teal. AC: palette follows the session theme.
 
 Out of scope: Lucid diagrams and other non-tuibox work.
 
 ## Done
+
+- **TB-060** Theme package format `themes/<name>/` (manifest + Windows/Ubuntu tuios themes), validator with WCAG contrast checks (body ≥ 7:1, dim ≥ 4.5:1), Windows/Ubuntu distinguishability check (36cc082).
+- **TB-061** zen packaged as the default theme; copilot-budget palette (data gradient, muted art slate, OK/WATCH/RISK, ubuntu accent) comes from the theme via `setPalette()`, `BUDGET_THEME` / `theme` setting, re-read every refresh (36cc082).
+- **TB-062** New themes nocturne, ember, mono with Ubuntu variants; all pass contrast (c1b12a0).
+- **TB-063** `themes/apply.ps1`: tuios theme + borders (nord→theme reload), WT schemes (backup, `Tuibox <Name>` names so the user's own "Nocturne" scheme isn't clobbered), panel setting, container via `apply.sh` (488b465).
+- **TB-064** `themes/apply.sh` for the container + `budget.py` palette.json (live re-read); tests (488b465).
+- **TB-065** Live demo 2026-11-02: nocturne → ember → mono → zen applied to sherpa + ubuntu; PLAN capture showed each panel background (#0B1020, #161311, #0A0A0A, #061214) without restarting the pane; zen restored, portrait layout restored (PLAN 32x69).
 
 - **TB-040 / TB-021 / TB-022** Stoppable launchers `start.ps1` (Ctrl+C stops, no restart loop) and `start.sh` (Node, else Python); settings file `~/.copilot/copilot-budget.json` with env overrides; the live PLAN pane runs via `start.ps1` from the worktree (f5fc0ba). Plugin link/enable is a user action (TB-040b).
 - **TB-041 / TB-023** `tuios/layouts/sherpa-portrait.ps1` restores SHERPA | UBUNTU-TUIOS | PLAN (PLAN grown until ≥32 cols). Live: SHERPA 46x69, UBUNTU-TUIOS 76x69, PLAN 32x69 (afd52f4). The earlier "PLAN ~66 under SHERPA" layout is superseded by the portrait request.

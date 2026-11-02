@@ -71,6 +71,28 @@ Settings → Open JSON file: add `windows-terminal/zen-scheme.json` and `zen-ubu
 
 Needs systemd (`[boot] systemd=true` in `/etc/wsl.conf` under WSL) and `loginctl enable-linger $USER`. `resume_agents` accepts `ask`, `auto` or `off`.
 
+## Themes
+
+A theme is a matched set under `themes/<name>/`: `theme.json` (manifest: Windows + Ubuntu border gradients, Windows Terminal scheme names, copilot-budget panel palette) plus `windows.json` / `ubuntu.json` (tuios theme files). Windows stays cool, the Ubuntu variant gets a warmer accent (borders, background tint) so the sessions are told apart at a glance.
+
+| Theme | Look | Windows fg/dim | Ubuntu fg/dim | Panel ink/dim |
+|---|---|---|---|---|
+| zen (default) | calm high-contrast teal; Ubuntu copper borders | 18.61 / 10.02 | 17.07 / 9.19 | 17.97 / 6.93 |
+| nocturne | deep ink blue + silver/ice; Ubuntu violet-ink + gold | 15.94 / 6.70 | 15.58 / 6.68 | 17.32 / 6.70 |
+| ember | warm charcoal + copper; Ubuntu redder ember + flame | 15.05 / 6.62 | 14.86 / 6.81 | 17.28 / 6.62 |
+| mono | black/white/greys, blueprint-like; Ubuntu sepia | 17.37 / 7.04 | 16.42 / 6.99 | 19.80 / 7.04 |
+
+WCAG contrast ratios against the background; minimums enforced by tests: body ≥ 7:1, dim ≥ 4.5:1.
+
+```powershell
+themes\apply.ps1 -List
+themes\apply.ps1 nocturne            # tuios (sherpa) + borders, WT schemes, panel, Ubuntu container
+themes\apply.ps1 zen -NoTerminal -NoUbuntu
+```
+
+`apply.ps1` copies the tuios theme, sets `theme` (via `nord` to force a reload) and the border options with `tuios set-config`, upserts the `Zen`/`Tuibox <Name>` (+ ` Ubuntu`) schemes in Windows Terminal and moves profiles that use a tuibox scheme to the new one (settings.json backed up as `.bak-<ts>`; JSON comments are not preserved), writes `theme`/`themesDir` to `~/.copilot/copilot-budget.json` (or set `BUDGET_THEME`), and runs `apply.sh` in the container. The panel and `budget.py` re-read their palette every refresh, no restart needed. In the container: `sh themes/apply.sh <name> [session]`.
+
+Tests: `node --test themes/` (manifest validation, contrast, WT mapping).
 ## Backlog
 
 See [BACKLOG.md](BACKLOG.md).

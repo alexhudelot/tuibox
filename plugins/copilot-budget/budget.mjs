@@ -970,14 +970,21 @@ function tinyView(cv, data, now) {
   items.slice(0, cv.h - 1).forEach((item, i) => kv(cv, 0, i + 1, cv.w, item));
 }
 
-export function render(data, width = 20, height = 40, now = Date.now(), { color = false } = {}) {
+// Styles share data, the tiny fallback and the canvas; each one supplies its own frames, modules and fillers.
+export const STYLES = ['synth-rack', 'cockpit', 'ledger', 'blueprint'];
+
+export function render(data, width = 20, height = 40, now = Date.now(), { color = false, style = 'synth-rack' } = {}) {
   width = Math.max(1, Math.floor(width));
   height = Math.max(1, Math.floor(height));
   const cv = new Canvas(width, height, color);
-  if (width < 20 || height < 6) {
-    tinyView(cv, data, now);
-    return cv.toString();
-  }
+  if (width < 20 || height < 6) tinyView(cv, data, now);
+  else ({ cockpit, ledger, blueprint }[style] ?? synthRack)(cv, data, now);
+  return cv.toString();
+}
+
+// Synth-rack: modular grid of rack cells packed by priority, spare cells filled with decorative synth art.
+function synthRack(cv, data, now) {
+  const { w: width, h: height } = cv;
   const cols = Math.max(1, Math.floor(width / CELL_W));
   const rows = Math.max(1, Math.floor(height / CELL_H));
   const xs = Array.from({ length: cols + 1 }, (_, i) => Math.floor(i * width / cols));
@@ -1050,7 +1057,286 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
       artModule(cv, frame(cv, box, ART[kind], true), ART[kind], seed % 97, now);
     }
   }
-  return cv.toString();
+}
+
+// ---------- shared style helpers ----------
+
+// The numbers every style shows, computed once.
+function facts(data, now) {
+  const fc = data.forecast ?? null;
+  const risk = riskStatus(fc, data.today);
+  const used = finite(data.plan?.usedPercent) ? data.plan.usedPercent : fc?.used ?? null;
+  const st = risk ? STATUS[risk] : null;
+  const capTxt = fc?.capAt ? capDate(fc.capAt) : 'none';
+  const detail = risk === 'RISK' ? [fc.capAt ? `cap ${capTxt}` : '', finite(fc.headroom) ? `${fc.headroom}d left` : ''].filter(Boolean).join(' · ')
+    : risk === 'WATCH' ? `→ ${percent(fc.projected)}` : '';
+  return {
+    fc, risk, used, tone: st?.tone ?? INK, state: st?.state ?? null, mark: st?.mark ?? '', detail,
+    rows: [
+      { label: 'USED', value: data.plan?.expired || data.plan?.unlimited ? planLabel(data.plan) : percent(used) },
+      { label: 'PACE', value: percent(fc?.pace), tone: AMBER },
+      { label: 'PROJ', value: percent(fc?.projected), tone: !finite(fc?.projected) ? INK : fc.projected > 100 ? ALERT : fc.projected > fc.target ? AMBER : CALM },
+      { label: 'CAP', value: capTxt, tone: fc?.capAt ? ALERT : INK },
+      { label: 'TODAY', value: compact(data.today) },
+      { label: 'BURN', value: compact(fc?.burn), tone: finite(fc?.burn) && finite(fc?.dailyTarget) && fc.burn > fc.dailyTarget ? AMBER : INK },
+      { label: 'DAY', value: compact(fc?.dailyTarget) },
+      { label: 'RESET', value: fc ? `${fc.daysToReset}d` : '--' },
+    ],
+  };
+}
+
+// Label left, value right-aligned; the value always wins over the label.
+function row(cv, x, y, w, label, value, lt = DIM, vt = INK) {
+  value = String(value).slice(0, w);
+  cv.text(x, y, label, lt, Math.max(0, w - value.length - 1));
+  cv.text(x + w - value.length, y, value, vt);
+}
+
+// Stack sections top-down; two columns when the pane is wide. A section is skipped when < min rows remain.
+function flow(cv, sections, { top = 0, bottom = cv.h, gap = 0, split = 70 } = {}) {
+  const n = cv.w >= split ? 2 : 1;
+  const colW = Math.floor(cv.w / n);
+  const ys = Array(n).fill(top);
+  for (const s of sections) {
+    const c = ys.indexOf(Math.min(...ys));
+    const avail = bottom - ys[c];
+    if (avail < s.min) continue;
+    const h = Math.min(s.max ?? s.min, avail);
+    const x = c * colW;
+    s.draw({ x, y: ys[c], w: c === n - 1 ? cv.w - x : colW, h });
+    ys[c] += h + gap;
+  }
+}
+
+function issueRows(cv, b, data, dense = false) {
+  const issues = data.jira?.issues ?? [];
+  issues.slice(0, b.h).forEach((issue, i) => {
+    const key = safeText(issue.key);
+    cv.put(b.x, b.y + i, issue.state === 'todo' ? '○' : '●', JIRA_TONE[issue.state] ?? DIM);
+    cv.text(b.x + 2, b.y + i, key, INK, b.w - 2);
+    cv.text(b.x + 3 + key.length, b.y + i, safeText(issue.summary), issue.state === 'todo' || dense ? DIM : INK, Math.max(0, b.w - key.length - 3));
+  });
+}
+
+function agentRows(cv, b, data) {
+  (data.agents ?? []).slice(0, b.h).forEach((a, i) => row(cv, b.x, b.y + i, b.w, safeText(a.label ?? '?'), percent(a.context), a.ubuntu ? UBUNTU : DIM));
+}
+
+const jiraHead = (data) => data.jira ? (data.jira.off ? 'JIRA off' : data.jira.stale ? 'JIRA stale' : `JIRA ${data.jira.issues?.length ?? 0}`) : '';
+
+// ---------- cockpit style ----------
+// Glass cockpit: annunciator strip, semicircular dials, a horizon tape for the daily burn, dense readouts.
+
+function annunciators(cv, b, f, data) {
+  const lamps = [['OK', f.risk === 'OK', CALM], ['WATCH', f.risk === 'WATCH', AMBER], ['RISK', f.risk === 'RISK', ALERT],
+    ['CAP', !!f.fc?.capAt, ALERT], ['SYNC', !!data.errors?.length, AMBER], ['JIRA', !!data.jira?.stale || !!data.jira?.off, AMBER]];
+  const n = clamp(Math.floor(b.w / 7), 3, lamps.length);
+  for (let i = 0; i < n; i++) {
+    const x0 = b.x + Math.floor(i * b.w / n);
+    const w = b.x + Math.floor((i + 1) * b.w / n) - x0;
+    const [name, lit, tone] = lamps[i];
+    const label = cv.color ? name : lit ? `[${name}]` : name.toLowerCase();
+    for (let x = x0; x < x0 + w - 1; x++) cv.put(x, b.y, ' ', null, lit ? tone : TRACK);
+    cv.text(x0 + Math.max(0, Math.floor((w - 1 - label.length) / 2)), b.y, label, lit ? INK_ON_FILL : DIM, w - 1);
+    for (let x = x0; x < x0 + w - 1 && cv.color; x++) cv.cells[b.y][x].bg = lit ? tone : TRACK;
+  }
+}
+
+function gauge(cv, b, value, max, label, marks = []) {
+  const R = Math.max(1, Math.min(Math.floor((b.w - 1) / 4), b.h - 2));
+  const cx = b.x + Math.floor(b.w / 2);
+  const cy = b.y + R;
+  const at = (v, r = R) => {
+    const th = Math.PI * (1 - clamp(v / max, 0, 1));
+    return [Math.round(cx + Math.cos(th) * r * 2), Math.round(cy - Math.sin(th) * r)];
+  };
+  const steps = R * 12;
+  for (let i = 0; i <= steps; i++) {
+    const v = i / steps * max;
+    const lit = finite(value) && v <= value;
+    const [x, y] = at(v);
+    cv.put(x, y, lit ? '█' : '░', lit ? gradient(0.3 + 0.65 * i / steps) : TRACK);
+  }
+  for (const [v, ch, tone] of marks) if (finite(v)) cv.put(...at(v), ch, tone);
+  if (finite(value)) {
+    for (let r = 1; r < R; r++) {
+      const [x, y] = at(Math.min(value, max), r);
+      cv.put(x, y, '·', INK);
+    }
+  }
+  const txt = percent(value);
+  cv.text(cx - Math.floor(txt.length / 2), cy, txt, INK);
+  if (b.h > R + 1) cv.text(cx - Math.floor(label.length / 2), cy + 1, label, DIM);
+}
+
+function horizon(cv, b, fc) {
+  const ref = finite(fc?.dailyTarget) && fc.dailyTarget > 0 ? fc.dailyTarget : (fc?.trend?.reduce((a, v) => a + v, 0) / 14) || 1;
+  const days = (fc?.trend ?? []).slice(-Math.max(1, b.w - 6));
+  const mid = b.y + Math.floor(b.h / 2);
+  cv.text(b.x, mid, 'HZN', DIM);
+  const left = b.x + b.w - days.length;
+  for (let x = b.x + 4; x < b.x + b.w; x++) cv.put(x, mid, '─', RULE === BG ? DIM : DIM);
+  days.forEach((v, i) => {
+    const d = v / ref;
+    if (d >= 1) {
+      const up = Math.min(mid - b.y, Math.max(1, Math.round((d - 1) * 2)));
+      for (let k = 1; k <= up; k++) cv.put(left + i, mid - k, k === up ? '▄' : '█', d > 1.5 ? ALERT : AMBER);
+      cv.put(left + i, mid, '┴', AMBER);
+    } else {
+      const down = Math.min(b.y + b.h - 1 - mid, v > 0 ? 1 : 0);
+      for (let k = 1; k <= down; k++) cv.put(left + i, mid + k, '▀', CALM);
+      cv.put(left + i, mid, v > 0 ? '┬' : '─', v > 0 ? CALM : DIM);
+    }
+  });
+}
+
+function cockpit(cv, data, now) {
+  cv.fill(0, 0, cv.w, cv.h, BG);
+  const f = facts(data, now);
+  const head = `${f.mark ? `${f.mark} ` : ''}${f.risk ?? '--'} ${f.detail}`.trim();
+  row(cv, 0, 0, cv.w, head, clockTime(now), f.tone, gradient(0.9));
+  annunciators(cv, { x: 0, y: 1, w: cv.w, h: 1 }, f, data);
+  const dialH = (w) => Math.min(Math.floor((w - 1) / 4), 5) + 2;
+  flow(cv, [
+    { min: 4, max: dialH(cv.w >= 70 ? Math.floor(cv.w / 2) : cv.w), draw: (b) => gauge(cv, b, f.used, 100, 'PLAN · pace ◆',
+      [[f.fc?.pace, '◆', AMBER]]) },
+    ...(f.fc ? [{ min: 4, max: dialH(cv.w >= 70 ? Math.floor(cv.w / 2) : cv.w), draw: (b) => gauge(cv, b, f.fc.projected, 200, 'PROJ /200 · 100 ◆',
+      [[100, '◆', AMBER]]) }] : []),
+    { min: 3, max: 5, draw: (b) => horizon(cv, { ...b, y: b.y, h: b.h }, f.fc) },
+    { min: 2, max: 4, draw: (b) => {
+      const half = b.w >= 24 ? Math.floor(b.w / 2) : b.w;
+      f.rows.slice(1).forEach((r, i) => {
+        const per = b.w >= 24 ? 2 : 1;
+        const y = b.y + Math.floor(i / per);
+        if (y < b.y + b.h) row(cv, b.x + (i % per) * half, y, half - (per > 1 ? 1 : 0), r.label, r.value, DIM, r.tone ?? INK);
+      });
+    } },
+    ...(data.jira ? [{ min: 2, max: 2 + Math.min(8, data.jira.issues?.length ?? 0), draw: (b) => {
+      row(cv, b.x, b.y, b.w, jiraHead(data), '', gradient(0.9));
+      issueRows(cv, { ...b, y: b.y + 1, h: b.h - 1 }, data, true);
+    } }] : []),
+    ...(data.agents?.length ? [{ min: 2, max: 1 + data.agents.length, draw: (b) => {
+      row(cv, b.x, b.y, b.w, 'CTX', `${data.agents.length}`, gradient(0.9));
+      agentRows(cv, { ...b, y: b.y + 1, h: b.h - 1 }, data);
+    } }] : []),
+  ], { top: 2, gap: 0 });
+}
+
+// ---------- ledger style ----------
+// Statement layout: thin rules, right-aligned figures, no boxes or art. Reads well in narrow panes.
+
+function ledger(cv, data, now) {
+  const f = facts(data, now);
+  const w = cv.w;
+  let y = 0;
+  const rule = (ch = '─') => { if (y < cv.h) cv.text(0, y++, ch.repeat(w), DIM); };
+  row(cv, 0, y++, w, `${f.mark ? `${f.mark} ` : ''}${f.risk ?? '--'} ${f.detail}`.trim(), clockTime(now), f.tone, gradient(0.9));
+  if (y < cv.h) row(cv, 0, y++, w, 'COPILOT BUDGET', clockDate(now), INK, DIM);
+  rule('═');
+  const per = w >= 56 ? 2 : 1;
+  const colW = Math.floor((w - (per - 1) * 3) / per);
+  for (let i = 0; i < f.rows.length && y < cv.h; i += per) {
+    for (let c = 0; c < per && i + c < f.rows.length; c++) {
+      const r = f.rows[i + c];
+      row(cv, c * (colW + 3), y, colW, r.label, r.value, DIM, r.tone ?? INK);
+      if (c) cv.put(c * (colW + 3) - 2, y, '│', DIM);
+    }
+    y++;
+  }
+  rule();
+  if (f.fc && y < cv.h) sparkline(cv, 0, y++, w, f.fc.trend, '14d');
+  if (data.jira && y + 1 < cv.h) {
+    rule();
+    row(cv, 0, y++, w, jiraHead(data), '', INK);
+    const n = Math.min(data.jira.issues?.length ?? 0, cv.h - y);
+    issueRows(cv, { x: 0, y, w, h: n }, data);
+    y += n;
+  }
+  if (data.agents?.length && y + 1 < cv.h) {
+    rule();
+    const n = Math.min(data.agents.length, cv.h - y);
+    agentRows(cv, { x: 0, y, w, h: n }, data);
+    y += n;
+  }
+  if (data.errors?.length && y < cv.h) cv.text(0, cv.h - 1, safeText(data.errors[0]), AMBER, w);
+}
+
+// ---------- blueprint style ----------
+// Technical drawing: thin single-line frames, dimension lines for the figures, dot-grid paper, title block.
+
+function thinFrame(cv, b, title) {
+  const tone = DIM;
+  for (let x = b.x; x < b.x + b.w; x++) { cv.put(x, b.y, '─', tone); cv.put(x, b.y + b.h - 1, '─', tone); }
+  for (let y = b.y; y < b.y + b.h; y++) { cv.put(b.x, y, '│', tone); cv.put(b.x + b.w - 1, y, '│', tone); }
+  for (let y = b.y + 1; y < b.y + b.h - 1; y++) for (let x = b.x + 1; x < b.x + b.w - 1; x++) cv.put(x, y, ' ');
+  cv.put(b.x, b.y, '┌', tone); cv.put(b.x + b.w - 1, b.y, '┐', tone);
+  cv.put(b.x, b.y + b.h - 1, '└', tone); cv.put(b.x + b.w - 1, b.y + b.h - 1, '┘', tone);
+  if (title && b.w >= title.length + 4) cv.text(b.x + 2, b.y, title, INK);
+  return { x: b.x + 2, y: b.y + 1, w: b.w - 4, h: b.h - 2 };
+}
+
+// ├── 26.7% ──┤ spanning `len` cells from x.
+function dimension(cv, x, y, len, label, tone) {
+  if (len < 2) {
+    cv.put(x, y, '┤', tone);
+    return cv.text(x + 2, y, label, INK);
+  }
+  for (let i = 0; i < len; i++) cv.put(x + i, y, '─', tone);
+  cv.put(x, y, '├', tone);
+  cv.put(x + len - 1, y, '┤', tone);
+  const text = ` ${label} `;
+  if (text.length <= len - 2) cv.text(x + Math.floor((len - text.length) / 2), y, text, INK);
+  else cv.text(x + len + 1, y, label, INK);
+}
+
+function blueprint(cv, data, now) {
+  const f = facts(data, now);
+  cv.fill(0, 0, cv.w, cv.h, BG);
+  for (let y = 2; y < cv.h; y += 2) for (let x = 0; x < cv.w; x += 4) cv.put(x, y, '·', TRACK);
+  const head = `${f.mark ? `${f.mark} ` : ''}${f.risk ?? '--'} ${f.detail}`.trim();
+  row(cv, 0, 0, cv.w, head, clockTime(now), f.tone, gradient(0.9));
+  const tbW = Math.min(cv.w, 28);
+  const tbH = cv.h >= 18 ? 7 : 0;
+  flow(cv, [
+    { min: 5, max: 6, draw: (b) => {
+      const inner = thinFrame(cv, b, 'PLAN');
+      const scale = Math.max(100, finite(f.fc?.projected) ? f.fc.projected : 0);
+      const len = (v) => Math.max(1, Math.round(clamp(v, 0, scale) / scale * (inner.w - 8)));
+      const lines = [['USED', f.used, CALM], ['PACE', f.fc?.pace, AMBER], ['PROJ', f.fc?.projected, f.fc?.projected > 100 ? ALERT : CALM]];
+      lines.slice(0, inner.h - 1).forEach(([name, v, tone], i) => {
+        cv.text(inner.x, inner.y + i, name, DIM);
+        if (finite(v)) dimension(cv, inner.x + 5, inner.y + i, len(v), percent(v), tone);
+        else cv.text(inner.x + 5, inner.y + i, '--', DIM);
+      });
+      const y = inner.y + Math.min(3, inner.h - 1);
+      const x100 = inner.x + 5 + len(100) - 1;
+      for (let x = inner.x + 5; x < inner.x + inner.w; x++) cv.put(x, y, '┈', DIM);
+      cv.put(inner.x + 5, y, '0', DIM);
+      if (x100 < inner.x + inner.w) cv.put(x100, y, '┬', INK);
+      if (x100 + 4 < inner.x + inner.w) cv.text(x100 + 1, y, '100', DIM);
+    } },
+    ...(f.fc ? [{ min: 4, max: 4, draw: (b) => {
+      const inner = thinFrame(cv, b, 'TREND');
+      sparkline(cv, inner.x, inner.y, inner.w, f.fc.trend, '14d');
+      if (inner.h > 1) row(cv, inner.x, inner.y + 1, inner.w, `→ ${percent(f.fc.projected)}`, f.fc.capAt ? `cap ${capDate(f.fc.capAt)}` : 'no cap', f.rows[2].tone, f.fc.capAt ? ALERT : DIM);
+    } }] : []),
+    { min: 4, max: 6, draw: (b) => {
+      const inner = thinFrame(cv, b, 'BURN');
+      f.rows.slice(4, 4 + inner.h).forEach((r, i) => row(cv, inner.x, inner.y + i, inner.w, r.label, r.value, DIM, r.tone ?? INK));
+    } },
+    ...(data.jira ? [{ min: 3, max: 2 + Math.min(8, Math.max(1, data.jira.issues?.length ?? 0)), draw: (b) => {
+      issueRows(cv, thinFrame(cv, b, jiraHead(data)), data);
+    } }] : []),
+    ...(data.agents?.length ? [{ min: 3, max: 2 + data.agents.length, draw: (b) => agentRows(cv, thinFrame(cv, b, 'AGENTS'), data) }] : []),
+  ], { top: 1, bottom: cv.h - tbH });
+  if (tbH) {
+    const b = { x: cv.w - tbW, y: cv.h - tbH, w: tbW, h: tbH };
+    const inner = thinFrame(cv, b, 'TITLE BLOCK');
+    [['DWG', 'COPILOT BUDGET'], ['DATE', `${clockDate(now)} ${clockTime(now)}`], ['RESET', f.rows[7].value],
+      ['GRADE', f.fc?.grade ?? '--'], ['STATUS', f.risk ?? '--']]
+      .slice(0, inner.h).forEach(([k, v], i) => row(cv, inner.x, inner.y + i, inner.w, k, v, DIM, k === 'STATUS' ? f.tone : INK));
+    for (let y = inner.y; y < inner.y + inner.h && inner.w > 10; y++) cv.put(inner.x + 6, y, '│', DIM);
+  }
 }
 
 // ---------- collection ----------
@@ -1144,6 +1430,7 @@ export async function loadSettings(env = process.env, home = env.COPILOT_HOME ||
     session: pick('session', 'TUIOS_SESSION') || env.TUIOS_PLUGIN_SESSION,
     export: pick('export', 'BUDGET_EXPORT') || undefined,
     theme: pick('theme', 'BUDGET_THEME') || 'zen',
+    style: STYLES.includes(pick('style', 'BUDGET_STYLE')) ? pick('style', 'BUDGET_STYLE') : 'synth-rack',
     themesDir: pick('themesDir', 'BUDGET_THEMES_DIR') || join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'themes'),
   };
 }
@@ -1193,11 +1480,12 @@ async function main() {
   if (feed && !interactive) await feed.refresh();
   // Every draw re-packs the grid from the current size; a size change also clears the screen.
   let drawnSize = '';
+  let style = settings.style;
   let redraw = () => {};
   const size = sizeSource(process.stdout, { onChange: () => redraw() });
   const draw = () => {
     const [width, height] = size.get();
-    const view = render(data, width, height, Date.now(), { color: interactive && !Object.hasOwn(process.env, 'NO_COLOR') });
+    const view = render(data, width, height, Date.now(), { color: interactive && !Object.hasOwn(process.env, 'NO_COLOR'), style });
     if (!interactive) return process.stdout.write(`${view}\n`);
     const clear = `${width}x${height}` !== drawnSize ? '\x1b[2J' : '';
     drawnSize = `${width}x${height}`;
@@ -1236,6 +1524,10 @@ async function main() {
     if (`${live.themesDir}|${live.theme}` !== themeKey) {
       themeKey = `${live.themesDir}|${live.theme}`;
       setPalette(await themePalette(live.theme, live.themesDir));
+    }
+    if (live.style !== style) {
+      style = live.style;
+      drawnSize = '';
     }
     try {
       data = await collect(telemetry, { ...options, jira: feed?.state });

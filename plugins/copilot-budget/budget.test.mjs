@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setPalette, themePalette, dockLine, clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
+import { STYLES, setPalette, themePalette, dockLine, clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
 
 const strip = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 const data = { plan: { usedPercent: 50 }, forecast: null, extras: null };
@@ -281,7 +281,9 @@ test('loadSettings: file defaults, env overrides, missing file ok', async (t) =>
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { themesDir, ...defaults } = await loadSettings({}, dir);
   assert.match(themesDir, /themes$/);
-  assert.deepEqual(defaults, { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined, export: undefined, theme: 'zen' });
+  assert.deepEqual(defaults, { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined, export: undefined, theme: 'zen', style: 'synth-rack' });
+  assert.equal((await loadSettings({ BUDGET_STYLE: 'ledger' }, dir)).style, 'ledger');
+  assert.equal((await loadSettings({ BUDGET_STYLE: 'nope' }, dir)).style, 'synth-rack');
   assert.equal((await loadSettings({ BUDGET_THEME: 'mono' }, dir)).theme, 'mono');
   await writeFile(`${dir}/copilot-budget.json`, JSON.stringify({ remote: 'r.json', target: 80, jira: false, session: 'sherpa' }));
   const s = await loadSettings({ BUDGET_TARGET: '90' }, dir);
@@ -342,4 +344,56 @@ test('themes: panel renders every palette with exact dimensions; palette reaches
   } finally {
     setPalette();
   }
+});
+test('styles x palettes: exact dimensions at all sizes, RISK always visible, key figures never clipped', async () => {
+  const { listThemes, THEMES_DIR } = await import('../../themes/themes.mjs');
+  const risky = { ...full, today: 2900, forecast: { ...full.forecast, projected: 238, overshoot: 138, capAt: NOW + 10 * 864e5, headroom: 10 } };
+  const loading = { plan: null, agents: [], errors: ['loading'] };
+  const jira = { ...risky, jira: { loaded: true, issues: [{ key: 'AO-425', summary: 'x'.repeat(300), state: 'progress' }] } };
+  assert.deepEqual(STYLES, ['synth-rack', 'cockpit', 'ledger', 'blueprint']);
+  try {
+    for (const theme of listThemes()) {
+      setPalette(await themePalette(theme, THEMES_DIR));
+      for (const style of STYLES) {
+        const step = theme === 'zen' ? 3 : 9;
+        for (const [w, h] of sizes(step)) {
+          for (const [name, d] of [['risky', risky], ['loading', loading], ['jira', jira]]) {
+            for (const color of [false, true]) {
+              const lines = strip(render(d, w, h, NOW, { color, style })).split('\n');
+              assert.equal(lines.length, h, `${theme}/${style} ${name} ${w}x${h}`);
+              for (const line of lines) assert.equal([...line].length, w, `${theme}/${style} ${name} ${w}x${h} color=${color}`);
+              if (name === 'risky' && w >= 6) assert.match(lines[0], /RISK|^! /, `${style} ${w}x${h} RISK`);
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    setPalette();
+  }
+  for (const style of ['cockpit', 'ledger', 'blueprint']) {
+    for (const [w, h] of [[34, 69], [24, 30], [80, 24], [164, 23]]) {
+      const view = render(risky, w, h, NOW, { style });
+      assert.match(view, /238%/, `${style} ${w}x${h} projection`);
+      assert.match(view, /12:57/, `${style} ${w}x${h} clock`);
+    }
+  }
+});
+
+test('style signatures: cockpit annunciators + dial, ledger rules without boxes, blueprint dimension lines + title block', () => {
+  const risky = { ...full, forecast: { ...full.forecast, projected: 238, capAt: NOW + 10 * 864e5, headroom: 10 } };
+  const cockpit = render(risky, 34, 40, NOW, { style: 'cockpit' });
+  assert.match(cockpit, /\[RISK\]/);
+  assert.match(cockpit, /watch/);
+  assert.match(cockpit, /HZN/);
+  assert.match(cockpit, /◆/);
+  const ledger = render(risky, 34, 40, NOW, { style: 'ledger' });
+  assert.match(ledger, /═{34}/);
+  assert.doesNotMatch(ledger, /[╭┌│◦┄]/);
+  assert.match(ledger.split('\n').find((l) => l.startsWith('PROJ')), /238%$/);
+  const blueprint = render(risky, 34, 40, NOW, { style: 'blueprint' });
+  assert.match(blueprint, /├─+ 238% ─+┤/);
+  assert.match(blueprint, /TITLE BLOCK/);
+  assert.match(blueprint, /GRADE/);
+  assert.match(render(risky, 34, 40, NOW, { style: 'unknown' }), /PLAN/);
 });

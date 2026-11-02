@@ -14,7 +14,29 @@ import time
 from datetime import datetime, timezone
 
 STALE_S = 180
-TEAL, AMBER, CORAL, DIM, RESET = "\x1b[38;2;95;179;171m", "\x1b[38;2;240;217;140m", "\x1b[38;2;242;140;120m", "\x1b[2m", "\x1b[0m"
+RESET = "\x1b[0m"
+DEFAULT_PALETTE = {"gradient": ["#134E4A", "#2F7F78", "#5FB3AB", "#8FD3C9", "#C4F1EA"], "dim": "#7FA3A0",
+                   "watch": "#F2C878", "risk": "#F28C78"}
+
+
+def palette(path=None):
+    """Theme palette written by themes/apply.sh (palette.json next to this file); zen if missing or broken."""
+    path = path or os.environ.get("BUDGET_PALETTE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "palette.json")
+    p = dict(DEFAULT_PALETTE)
+    try:
+        with open(path, encoding="utf-8") as f:
+            p.update(json.load(f))
+    except (OSError, ValueError):
+        pass
+
+    def fg(hex_):
+        try:
+            h = str(hex_).lstrip("#")
+            return "\x1b[38;2;%d;%d;%dm" % tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return ""
+    grad = p.get("gradient") or DEFAULT_PALETTE["gradient"]
+    return {"ok": fg(grad[len(grad) // 2]), "watch": fg(p.get("watch")), "risk": fg(p.get("risk")), "dim": fg(p.get("dim"))}
 
 
 def finite(x):
@@ -71,7 +93,7 @@ def fit(s, w):
     return (s[:w] if len(s) > w else s + " " * (w - len(s))) if w > 0 else ""
 
 
-def render(data, state, width, height, now=None, color=False):
+def render(data, state, width, height, now=None, color=False, pal=None):
     """Return exactly `height` lines of exactly `width` cells (ASCII/BMP single-width glyphs only)."""
     t = datetime.fromtimestamp(now or time.time())
     lines = []
@@ -106,9 +128,11 @@ def render(data, state, width, height, now=None, color=False):
     out = [fit(l, width) for l in lines[:height]]
     out += [" " * width] * (height - len(out))
     if color and out:
-        tint = {"RISK": CORAL, "WATCH": AMBER}.get(status, TEAL)
+        pal = pal or palette()
+        tint = {"RISK": pal["risk"], "WATCH": pal["watch"]}.get(status, pal["ok"])
         out[0] = tint + out[0] + RESET
-        out[1:] = [TEAL + l + RESET if i == 0 else (DIM + l + RESET if l.startswith("snapshot") else l) for i, l in enumerate(out[1:])]
+        out[1:] = [pal["ok"] + l + RESET if i == 0 else (pal["dim"] + l + RESET if l.startswith("snapshot") else l)
+                   for i, l in enumerate(out[1:])]
     return out
 
 

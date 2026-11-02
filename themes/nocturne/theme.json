@@ -3,7 +3,7 @@
   "description": "Deep ink blue with silver/ice accents. Ubuntu: violet-ink background, warm gold borders.",
   "windows": {
     "tuios": "windows.json",
-    "wtScheme": "Nocturne",
+    "wtScheme": "Tuibox Nocturne",
     "borders": {
       "border_focused_gradient": "#1d2a4a #3e5a8c #a9c7ff",
       "border_unfocused_color": "#24304d"
@@ -11,7 +11,7 @@
   },
   "ubuntu": {
     "tuios": "ubuntu.json",
-    "wtScheme": "Nocturne Ubuntu",
+    "wtScheme": "Tuibox Nocturne Ubuntu",
     "borders": {
       "border_focused_gradient": "#5a3a1e #b07a3e #f0c890",
       "border_unfocused_color": "#3e2e38"

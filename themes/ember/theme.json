@@ -3,7 +3,7 @@
   "description": "Warm charcoal with copper accents. Ubuntu: redder ember background, flame-orange borders.",
   "windows": {
     "tuios": "windows.json",
-    "wtScheme": "Ember",
+    "wtScheme": "Tuibox Ember",
     "borders": {
       "border_focused_gradient": "#3a2a20 #8a5a3a #d9a070",
       "border_unfocused_color": "#3a2c24"
@@ -11,7 +11,7 @@
   },
   "ubuntu": {
     "tuios": "ubuntu.json",
-    "wtScheme": "Ember Ubuntu",
+    "wtScheme": "Tuibox Ember Ubuntu",
     "borders": {
       "border_focused_gradient": "#5a2a10 #c8601e #ffb070",
       "border_unfocused_color": "#4a2618"

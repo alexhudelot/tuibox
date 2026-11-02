@@ -3,7 +3,7 @@
   "description": "Black/white/greys, blueprint-like (matches the B&W HTML). Ubuntu: warm sepia borders and paper-black background.",
   "windows": {
     "tuios": "windows.json",
-    "wtScheme": "Mono",
+    "wtScheme": "Tuibox Mono",
     "borders": {
       "border_focused_gradient": "#3a3a3a #8a8a8a #e8e8e8",
       "border_unfocused_color": "#2e2e2e"
@@ -11,7 +11,7 @@
   },
   "ubuntu": {
     "tuios": "ubuntu.json",
-    "wtScheme": "Mono Ubuntu",
+    "wtScheme": "Tuibox Mono Ubuntu",
     "borders": {
       "border_focused_gradient": "#4a3a28 #9a7a50 #e8d4b0",
       "border_unfocused_color": "#3a3026"

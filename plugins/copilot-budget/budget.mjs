@@ -102,9 +102,19 @@ export class Telemetry {
     this.quotas = new Map();
   }
 
+  // A fresh install has no session-state folder yet: treat it as empty.
+  async entries() {
+    try {
+      return await readdir(this.directory, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
   async newestQuota() {
     let newest = null;
-    for (const entry of await readdir(this.directory, { withFileTypes: true })) {
+    for (const entry of await this.entries()) {
       if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/i.test(entry.name)) continue;
       const file = join(this.directory, entry.name, 'events.jsonl');
       try {
@@ -123,7 +133,7 @@ export class Telemetry {
   // Copilot holds inuse.<pid>.lock in a session folder while that process runs.
   async liveSessions() {
     const sessions = [];
-    for (const entry of await readdir(this.directory, { withFileTypes: true })) {
+    for (const entry of await this.entries()) {
       if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/i.test(entry.name)) continue;
       let names;
       try {
@@ -266,9 +276,20 @@ export function forecast({ plan, history, now = Date.now(), target = 100 }) {
   }
   return {
     used, target, projected, overshoot: finite(projected) ? projected - target : null, capAt,
+    headroom: capAt === null ? null : Math.max(0, Math.ceil((capAt - now) / DAY)),
     dailyTarget, burn, base, mix, ctx, cache, grade, remaining, trend,
     pace: clamp((now - start) / (reset - start) * 100, 0, 100), daysToReset: Math.max(0, Math.ceil((reset - now) / DAY)),
   };
+}
+
+// RISK: heading past 100% or hitting the cap before reset. WATCH: past target, used running more
+// than 10 points ahead of pace, or today's burn above the daily target. OK otherwise.
+export function riskStatus(fc, today = null) {
+  if (!fc) return null;
+  if ((finite(fc.projected) && fc.projected > 100) || fc.capAt) return 'RISK';
+  if ((finite(fc.projected) && fc.projected > fc.target) || (finite(fc.used) && finite(fc.pace) && fc.used > fc.pace + 10)
+    || (finite(today) && finite(fc.dailyTarget) && today > fc.dailyTarget)) return 'WATCH';
+  return 'OK';
 }
 
 // ---------- rendering ----------
@@ -305,6 +326,16 @@ const ALERT = '242;140;120';
 const UBUNTU = '200;131;74';
 const CALM = gradient(0.55);
 const LEDS = { ok: CALM, warn: AMBER, alert: ALERT };
+// Decorative modules use a muted slate family so they never read as data.
+const SLATE = [[0, [36, 42, 48]], [1, [118, 130, 142]]];
+export const slate = (t) => {
+  t = clamp(t, 0, 1);
+  const [[, from], [, to]] = SLATE;
+  return from.map((c, j) => Math.round(c + (to[j] - c) * t)).join(';');
+};
+const STATUS = { OK: { state: 'ok', tone: CALM, mark: '' }, WATCH: { state: 'warn', tone: AMBER, mark: '~' },
+  RISK: { state: 'alert', tone: ALERT, mark: '!' } };
+const capDate = (time) => new Date(time).toISOString().slice(5, 10);
 const CELL_W = 12;
 const CELL_H = 5;
 
@@ -312,7 +343,7 @@ const compact = (value) => !finite(value) ? '--' : value >= 10000 ? `${Math.roun
   : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${Math.round(value)}`;
 const percent = (value) => finite(value) ? `${Math.round(value)}%` : '--';
 const shortModel = (model) => (model ?? '').replace(/^claude-/, '').replace(/^gpt-/, 'g').replace(/[-.]/g, '');
-const knob = (fraction) => '○◔◑◕●'[Math.round(clamp(fraction, 0, 1) * 4)];
+const knob = (fraction) => '○◔◑◕●'[finite(fraction) ? Math.round(clamp(fraction, 0, 1) * 4) : 0];
 const hash = (a, b) => (((a + 1) * 73856093) ^ ((b + 1) * 19349663)) >>> 0;
 const severity = (value, warn, alert) => !finite(value) ? null : value >= alert ? 'alert' : value >= warn ? 'warn' : 'ok';
 
@@ -359,24 +390,25 @@ const led = (cv, x, y, state) => cv.put(x, y, cv.color || state !== 'ok' ? '●'
 // Synth-panel frame: rounded border in the teal gradient, screw dots and a small label.
 function frame(cv, b, title, art) {
   cv.fill(b.x, b.y, b.w, b.h, BG);
-  const tone = (x) => gradient((art ? 0.12 : 0.3) + (art ? 0.3 : 0.55) * x / Math.max(1, cv.w - 1));
+  const tone = (x) => art ? slate(0.35 + 0.2 * x / Math.max(1, cv.w - 1)) : gradient(0.3 + 0.55 * x / Math.max(1, cv.w - 1));
+  const [hz, vt] = art ? ['┄', '┆'] : ['─', '│'];
   for (let i = 0; i < b.w; i++) {
     const x = b.x + i;
     const end = i === 0 ? 0 : i === b.w - 1 ? 1 : -1;
-    cv.put(x, b.y, end < 0 ? '─' : '╭╮'[end], tone(x));
-    cv.put(x, b.y + b.h - 1, end < 0 ? '─' : '╰╯'[end], tone(x));
+    cv.put(x, b.y, end < 0 ? hz : '╭╮'[end], tone(x));
+    cv.put(x, b.y + b.h - 1, end < 0 ? hz : '╰╯'[end], tone(x));
   }
   for (let r = 1; r < b.h - 1; r++) {
-    cv.put(b.x, b.y + r, '│', tone(b.x));
-    cv.put(b.x + b.w - 1, b.y + r, '│', tone(b.x + b.w - 1));
+    cv.put(b.x, b.y + r, vt, tone(b.x));
+    cv.put(b.x + b.w - 1, b.y + r, vt, tone(b.x + b.w - 1));
   }
   if (b.w >= 8) {
     for (const y of [b.y, b.y + b.h - 1]) {
-      cv.put(b.x + 1, y, '◦', DIM);
-      cv.put(b.x + b.w - 2, y, '◦', DIM);
+      cv.put(b.x + 1, y, '◦', art ? slate(0.4) : DIM);
+      cv.put(b.x + b.w - 2, y, '◦', art ? slate(0.4) : DIM);
     }
   }
-  if (title && b.w >= title.length + 6) cv.text(b.x + 2, b.y, ` ${title} `, art ? DIM : gradient(0.95));
+  if (title && b.w >= title.length + 6) cv.text(b.x + 2, b.y, ` ${title} `, art ? slate(0.6) : gradient(0.95));
   return { x: b.x + 1, y: b.y + 1, w: b.w - 2, h: b.h - 2 };
 }
 
@@ -452,10 +484,11 @@ function planModule(cv, b, data) {
   const plan = data.plan;
   const used = !plan?.expired && finite(plan?.usedPercent) ? clamp(plan.usedPercent, 0, 100) : null;
   const label = plan?.expired ? 'EXP' : plan?.unlimited ? 'UNL' : used !== null ? `${Math.round(used)}%` : '--';
-  const state = used === null ? null : used >= 90 ? 'alert' : fc && used > fc.pace + 5 ? 'warn' : 'ok';
+  const risk = riskStatus(fc, data.today);
+  const state = used === null ? null : risk ? STATUS[risk].state : used >= 90 ? 'alert' : 'ok';
   if (b.h <= 1) {
-    const head = `${label} `;
-    cv.text(b.x, b.y, head, INK, b.w);
+    const head = `${risk && STATUS[risk].mark ? `${STATUS[risk].mark} ` : ''}${label} `;
+    cv.text(b.x, b.y, head, risk ? STATUS[risk].tone : INK, b.w);
     planBar(cv, b.x + head.length, b.y, b.w - head.length, 1, used, fc);
     return;
   }
@@ -543,23 +576,15 @@ function forecastModule(cv, b, data) {
     { label: 'BURN', value: compact(fc.burn) },
     { label: 'TGT', value: percent(fc.target) },
   ];
-  const spark = (x, y, w) => {
-    const trend = fc.trend.slice(-Math.max(1, w - 4));
-    const peak = Math.max(...trend, 1);
-    cv.text(x, y, '14d', DIM);
-    const left = x + w - trend.length;
-    trend.forEach((v, i) => {
-      const level = v > 0 ? Math.min(7, Math.floor(v / peak * 8)) : -1;
-      cv.put(left + i, y, level < 0 ? '·' : SPARK[level], level < 0 ? TRACK : gradient(0.35 + level / 11));
-    });
-  };
+  const spark = (x, y, w) => sparkline(cv, x, y, w, fc.trend);
+
   stack(cv, b, items, b.h >= 4 ? [spark] : []);
 }
 
 function modelModule(cv, b, data) {
   const fc = data.forecast;
   stack(cv, b, [
-    { label: 'MIX', value: `${knob((fc.mix - 0.5) / 1.5)} x${fc.mix.toFixed(1)}`, tone: fc.mix > 1.2 ? AMBER : INK },
+    { label: 'MIX', value: finite(fc.mix) ? `${knob((fc.mix - 0.5) / 1.5)} x${fc.mix.toFixed(1)}` : '--', tone: fc.mix > 1.2 ? AMBER : INK },
     { label: 'CTX', value: `${fc.grade} ${percent(finite(fc.cache) ? fc.cache * 100 : null)}`,
       tone: fc.grade === 'C' ? ALERT : fc.grade === 'B' ? AMBER : CALM,
       state: fc.grade === 'C' ? 'alert' : fc.grade === 'B' ? 'warn' : fc.grade === 'A' ? 'ok' : null },
@@ -585,7 +610,7 @@ function agentsModule(cv, b, data) {
     cv.text(b.x + 2, y, name, a.ubuntu ? UBUNTU : DIM, nameW);
     cv.text(b.x + b.w - pct.length, y, pct, INK);
     let x = b.x + 2 + 13;
-    const tag = a.model ? `${shortModel(a.model).slice(0, 7)}${a.effort ? `·${a.effort[0]}` : ''}` : '';
+    const tag = a.model ? `${safeText(shortModel(a.model)).slice(0, 7)}${a.effort ? `·${a.effort[0]}` : ''}` : '';
     const gaugeEnd = b.x + b.w - pct.length - 1;
     if (tag && gaugeEnd - x - tag.length - 1 >= 6) {
       cv.text(x, y, tag, DIM);
@@ -599,6 +624,224 @@ function agentsModule(cv, b, data) {
 
 function sysModule(cv, b, data) {
   (data.errors ?? []).slice(0, b.h).forEach((e, i) => cv.text(b.x, b.y + i, safeText(e), ALERT, b.w));
+}
+
+function sparkline(cv, x, y, w, trend, label = '14d') {
+  if (w <= 0) return;
+  if (w < label.length + 4) label = '';
+  const values = trend.slice(-Math.max(1, w - (label ? label.length + 1 : 0)));
+  const peak = Math.max(...values, 1);
+  cv.text(x, y, label, DIM);
+  const left = x + w - values.length;
+  values.forEach((v, i) => {
+    const level = v > 0 ? Math.min(7, Math.floor(v / peak * 8)) : -1;
+    cv.put(left + i, y, level < 0 ? '·' : SPARK[level], level < 0 ? TRACK : gradient(0.35 + level / 11));
+  });
+}
+
+// Headline forecast next to PLAN: risk status, projected month-end %, overshoot, cap ETA, trend.
+function trendModule(cv, b, data) {
+  const fc = data.forecast;
+  const risk = riskStatus(fc, data.today);
+  if (!fc) {
+    cv.text(b.x, b.y + Math.floor((b.h - 1) / 2), '→ -- no history', DIM, b.w);
+    return;
+  }
+  const { tone, state } = STATUS[risk];
+  const over = finite(fc.overshoot) ? `${fc.overshoot > 0 ? '+' : ''}${Math.round(fc.overshoot)}%` : '';
+  const proj = `→ ${percent(fc.projected)}`;
+  if (b.h <= 1) {
+    const cap = fc.capAt ? ` cap ${capDate(fc.capAt)}` : '';
+    const sw = Math.max(0, b.w - proj.length - cap.length - 2);
+    cv.text(b.x, b.y, proj, tone, b.w);
+    if (sw >= 3) sparkline(cv, b.x + proj.length + 1, b.y, sw, fc.trend, '');
+    cv.text(b.x + b.w - cap.length, b.y, cap, ALERT, cap.length <= b.w - proj.length ? cap.length : 0);
+    return;
+  }
+  // Rows of [left, right] in priority order; a right part that does not fit moves to its own row.
+  const rows = [[{ text: risk, tone, led: state }, fc.capAt ? { text: `cap ${capDate(fc.capAt)}`, tone: ALERT } : null],
+    [{ text: proj, tone }, over ? { text: over, tone: fc.overshoot > 0 ? ALERT : CALM } : null],
+    risk === 'RISK' && finite(fc.headroom) ? [{ text: `headroom ${fc.headroom}d`, tone: ALERT }, null]
+      : [{ text: 'day', tone: DIM }, { text: compact(fc.dailyTarget), tone: INK }]];
+  const lines = [];
+  for (const [l, r] of rows) {
+    const lw = l.text.length + (l.led ? 2 : 0);
+    if (!r || lw + r.text.length + 1 <= b.w) lines.push([l, r]);
+    else lines.push([l, null], [null, r]);
+  }
+  const bigLabel = percent(fc.projected);
+  const big = [...bigLabel].every((c) => c in DIGITS) && b.h >= lines.length + 6 && b.w >= bigLabel.length * 4 + 3;
+  const spark = b.h >= lines.length + (big ? 6 : 1);
+  const shown = lines.slice(0, b.h - (spark ? 1 : 0) - (big ? 5 : 0));
+  let y = b.y + Math.floor((b.h - shown.length - (spark ? 1 : 0) - (big ? 5 : 0)) / 2);
+  shown.forEach(([l, r], i) => {
+    if (i === 1 && big) {
+      const bw = bigLabel.length * 4 - 1;
+      const left = b.x + Math.floor((b.w - bw) / 2);
+      [...bigLabel].forEach((g, k) => DIGITS[g].forEach((row, rr) => [...row].forEach((ch, j) => {
+        if (ch !== ' ') cv.put(left + k * 4 + j, y + rr, '█', tone);
+      })));
+      y += 5;
+    }
+    if (l) {
+      if (l.led) led(cv, b.x, y, l.led);
+      cv.text(b.x + (l.led ? 2 : 0), y, l.text, l.tone, b.w);
+    }
+    if (r) cv.text(b.x + b.w - r.text.length, y, r.text, r.tone, b.w);
+    y++;
+  });
+  if (spark) sparkline(cv, b.x, y, b.w, fc.trend);
+}
+
+// Local wall clock, e.g. "Mon 02 Nov" and "12:57".
+const two = (n) => String(n).padStart(2, '0');
+export const clockTime = (now) => {
+  const d = new Date(now);
+  return `${two(d.getHours())}:${two(d.getMinutes())}`;
+};
+export const clockDate = (now) => {
+  const d = new Date(now);
+  return `${'Sun Mon Tue Wed Thu Fri Sat'.split(' ')[d.getDay()]} ${two(d.getDate())} ${
+    'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[d.getMonth()]}`;
+};
+
+// Synth-style display: big teal digits when there is room, else "Mon 02 Nov · 12:57" or just the time.
+function clockModule(cv, b, data, now) {
+  const time = clockTime(now);
+  const date = clockDate(now);
+  const glyph = (ch) => ch === ':' ? [' ', '█', ' ', '█', ' '] : DIGITS[ch];
+  const bigW = 4 * 4 + 1 + 1;
+  if (b.h >= 5 && b.w >= bigW + 2) {
+    const left = b.x + Math.floor((b.w - bigW) / 2);
+    const top = b.y + Math.floor((b.h - 5 - (b.h >= 6 ? 1 : 0)) / 2);
+    let x = left;
+    for (const ch of time) {
+      const rows = glyph(ch);
+      rows.forEach((row, r) => [...row].forEach((c, j) => {
+        if (c !== ' ') cv.put(x + j, top + r, '█', gradient(0.5 + 0.5 * (x - left + j) / bigW));
+      }));
+      x += rows[0].length + 1;
+    }
+    if (b.h >= 6) cv.text(b.x + Math.floor((b.w - date.length) / 2), top + 5, date, DIM);
+    return;
+  }
+  const full = `${date} · ${time}`;
+  const lines = b.w >= full.length ? [full] : b.w >= date.length && b.h >= 2 ? [date, time] : [time];
+  const top = b.y + Math.floor((b.h - lines.length) / 2);
+  lines.forEach((line, i) => {
+    const x = b.x + Math.max(0, Math.floor((b.w - line.length) / 2));
+    cv.text(x, top + i, line, line === date ? DIM : gradient(0.9), b.w);
+    if (line === full) cv.text(x + date.length + 3, top + i, time, gradient(0.9));
+  });
+}
+
+// ---------- jira ----------
+
+const JIRA_STATE = (issue) => /review|block/i.test(issue.status) ? 'review'
+  : issue.category === 'indeterminate' ? 'progress' : 'todo';
+const JIRA_TONE = { todo: DIM, progress: gradient(0.6), review: AMBER };
+
+export const jiraTitle = (jira) => jira.off ? 'JIRA · off'
+  : `JIRA${jira.sprint ? ` · ${safeText(jira.sprint)}` : ''}${jira.stale ? ' · stale' : ''}`;
+
+// Parse twg's stdout.json for a work item query (read-only).
+export function parseJira(json) {
+  const issues = (json?.data?.issues ?? []).map((i) => ({
+    key: String(i.key ?? '?'), summary: String(i.summary ?? i.fields?.summary ?? '').trim(),
+    status: String(i.status?.name ?? i.fields?.status?.name ?? ''),
+    category: i.status?.statusCategory?.key ?? i.fields?.status?.statusCategory?.key ?? 'new',
+  }));
+  const sprints = (json?.data?.issues ?? []).flatMap((i) => i.customfield_10020 ?? i.fields?.customfield_10020 ?? i.sprint ?? []);
+  const sprint = [sprints].flat().find((s) => s?.state === 'active')?.name ?? null;
+  return { issues, sprint };
+}
+
+function jiraModule(cv, b, data) {
+  const jira = data.jira;
+  const issues = jira.issues ?? [];
+  if (jira.off || (!issues.length && jira.stale)) {
+    cv.text(b.x + Math.max(0, Math.floor((b.w - 10) / 2)), b.y + Math.floor((b.h - 1) / 2),
+      jira.off ? 'jira: off' : 'jira: stale', jira.off ? DIM : AMBER, b.w);
+    return;
+  }
+  if (!issues.length) {
+    cv.text(b.x, b.y + Math.floor((b.h - 1) / 2), jira.loaded ? 'no open tickets' : 'loading…', DIM, b.w);
+    return;
+  }
+  const counts = { todo: 0, progress: 0, review: 0 };
+  for (const issue of issues) counts[JIRA_STATE(issue)]++;
+  if (b.w < 22) {
+    kvGrid(cv, b, [{ label: 'TODO', value: `${counts.todo}` }, { label: 'WIP', value: `${counts.progress}`, tone: JIRA_TONE.progress },
+      { label: 'REV', value: `${counts.review}`, tone: counts.review ? AMBER : INK }]);
+    return;
+  }
+  const rows = issues.length <= b.h ? issues.length : b.h - 1;
+  const keyW = Math.min(10, Math.max(...issues.map((i) => i.key.length)));
+  issues.slice(0, rows).forEach((issue, i) => {
+    const state = JIRA_STATE(issue);
+    const y = b.y + i;
+    cv.put(b.x, y, state === 'todo' ? '○' : '●', JIRA_TONE[state]);
+    cv.text(b.x + 2, y, safeText(issue.key), INK, keyW);
+    const room = b.w - keyW - 3;
+    let summary = safeText(issue.summary);
+    if (summary.length > room) summary = `${summary.slice(0, Math.max(0, room - 1))}…`;
+    cv.text(b.x + keyW + 3, y, summary, state === 'todo' ? DIM : INK, room);
+  });
+  if (issues.length > rows) {
+    cv.text(b.x + 2, b.y + rows, `+${issues.length - rows} more · ${counts.progress} wip ${counts.review} rev`, DIM, b.w - 2);
+  }
+}
+
+// Background poller: never blocks rendering; keeps the last good result and flags it stale on error.
+export class JiraFeed {
+  constructor({ run, interval = 300000 } = {}) {
+    this.run = run ?? runTwg;
+    this.interval = interval;
+    this.state = { issues: [], sprint: null, loaded: false, stale: false, off: false };
+    this.busy = null;
+  }
+
+  refresh() {
+    this.busy ??= (async () => {
+      try {
+        Object.assign(this.state, await this.run(), { loaded: true, stale: false, off: false });
+      } catch (error) {
+        if (error.code === 'ENOENT' && !this.state.loaded) this.state.off = true;
+        else this.state.stale = true;
+      } finally {
+        this.busy = null;
+        this.onUpdate?.();
+      }
+    })();
+    return this.busy;
+  }
+
+  start() {
+    this.refresh();
+    setInterval(() => this.refresh(), this.interval).unref();
+    return this;
+  }
+}
+
+const JQL = 'assignee = currentUser() AND sprint in openSprints() AND statusCategory != Done ORDER BY priority DESC, updated DESC';
+
+async function runTwg() {
+  const candidates = [process.env.TWG_BIN, 'twg', process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'twg', 'bin', 'twg.exe')]
+    .filter(Boolean);
+  let lastError;
+  for (const bin of candidates) {
+    try {
+      const { stdout } = await execute(bin, ['jira', 'workitem', 'query', '--jql', JQL,
+        '--fields', 'key,summary,status,issuetype,priority,customfield_10020', '-n', '30', '-o', 'json'],
+      { timeout: 90000, windowsHide: true, maxBuffer: 8 << 20 });
+      const file = /stdout:\s*"([^"]+)"/.exec(stdout)?.[1]?.replace(/\\\\/g, '\\');
+      return parseJira(JSON.parse(file ? await readFile(file, 'utf8') : stdout));
+    } catch (error) {
+      lastError = error;
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  throw lastError;
 }
 
 // ---------- art modules ----------
@@ -623,11 +866,11 @@ function plot(cv, b, f, tone, vertices = false) {
 
 function artModule(cv, b, kind, seed, now) {
   if (b.w <= 0 || b.h <= 0) return;
-  const tone = (i) => gradient(0.3 + 0.35 * i / Math.max(1, b.w - 1));
+  const tone = (i) => slate(0.45 + 0.3 * i / Math.max(1, b.w - 1));
   const tick = Math.floor(now / 1000);
   if (kind === 'OSC ∿') {
     const mid = b.y + Math.floor(b.h / 2);
-    if (b.h >= 3) for (let i = 0; i < b.w; i++) cv.put(b.x + i, mid, '┄', RULE);
+    if (b.h >= 3) for (let i = 0; i < b.w; i++) cv.put(b.x + i, mid, '┄', slate(0.15));
     const phase = now / 900 + seed;
     const cycles = 1 + seed % 2;
     for (let i = 0; i < b.w; i++) {
@@ -651,9 +894,9 @@ function artModule(cv, b, kind, seed, now) {
     const top = b.y + Math.max(0, Math.floor((b.h - 3) / 2));
     for (let i = 0; i < count; i++) {
       const x = left + i * 5;
-      cv.put(x + 1, top, KNOB_GLYPHS[(seed + i * 3 + Math.floor(tick / 30)) % 5], gradient(0.5 + i * 0.1));
+      cv.put(x + 1, top, KNOB_GLYPHS[(seed + i * 3 + Math.floor(tick / 30)) % 5], slate(0.5 + i * 0.1));
       if (b.h >= 2) cv.text(x, top + 1, names[i].slice(0, 4), DIM);
-      if (b.h >= 3) cv.put(x + 1, top + 2, '◎', gradient(0.3));
+      if (b.h >= 3) cv.put(x + 1, top + 2, '◎', slate(0.3));
     }
   } else if (kind === 'SEQ') {
     const steps = Math.max(1, Math.min(16, Math.floor((b.w + 1) / 2)));
@@ -661,10 +904,10 @@ function artModule(cv, b, kind, seed, now) {
     const active = Math.floor(now / 2000) % steps;
     for (let i = 0; i < steps; i++) {
       const lit = i === active || (seed >> i) % 4 === 0;
-      cv.put(left + i * 2, b.y, cv.color || lit ? '●' : '○', i === active ? AMBER : lit ? CALM : TRACK);
+      cv.put(left + i * 2, b.y, cv.color || lit ? '●' : '○', i === active ? slate(1) : lit ? slate(0.7) : slate(0.2));
       for (let r = 1; r < b.h; r++) {
         const level = (hash(i, seed) >> (r * 3)) % 8;
-        cv.put(left + i * 2, b.y + r, SPARK[level], gradient(0.25 + level / 16));
+        cv.put(left + i * 2, b.y + r, SPARK[level], slate(0.25 + level / 16));
       }
     }
   } else if (kind === 'VU') {
@@ -672,13 +915,13 @@ function artModule(cv, b, kind, seed, now) {
     const top = b.y + Math.floor((b.h - rows) / 2);
     for (let r = 0; r < rows; r++) {
       const level = 35 + 45 * Math.abs(Math.sin(now / 1300 + seed + r * 1.7));
-      meter(cv, b.x, top + r, b.w, level, `${'LRM'[r]} `, gradient(0.45));
+      meter(cv, b.x, top + r, b.w, level, `${'LRM'[r]} `, slate(0.45));
     }
   } else if (kind === 'MULT') {
     const jacks = Math.max(1, Math.floor((b.w + 2) / 4));
     const left = b.x + Math.floor((b.w - (jacks * 4 - 3)) / 2);
-    for (let i = 0; i < jacks; i++) cv.put(left + i * 4, b.y, '◎', gradient(0.45));
-    const cables = [AMBER, UBUNTU, gradient(0.7)];
+    for (let i = 0; i < jacks; i++) cv.put(left + i * 4, b.y, '◎', slate(0.45));
+    const cables = [slate(0.55), slate(0.75), slate(0.95)];
     for (let p = 0; p + 1 < jacks && b.h >= 2; p += 2) {
       const a = left + p * 4;
       const z = left + (p + 1) * 4 + (p + 2 < jacks && seed % 2 ? 4 : 0);
@@ -693,7 +936,7 @@ function artModule(cv, b, kind, seed, now) {
     const vw = Math.max(1, Math.floor(b.w / 2));
     for (let r = 0; r < b.h; r++) {
       if (r % 2 === b.h % 2) continue;
-      for (let i = 0; i < vw; i++) cv.put(b.x + Math.floor((b.w - vw) / 2) + i, b.y + r, '┄', RULE);
+      for (let i = 0; i < vw; i++) cv.put(b.x + Math.floor((b.w - vw) / 2) + i, b.y + r, '┄', slate(0.15));
     }
   }
 }
@@ -701,16 +944,19 @@ function artModule(cv, b, kind, seed, now) {
 // ---------- layout ----------
 
 // Tiny panes: the plan figure and bar on the first line, then the key numbers one per line.
-function tinyView(cv, data) {
+function tinyView(cv, data, now) {
   const fc = data.forecast;
   planModule(cv, { x: 0, y: 0, w: cv.w, h: 1 }, data);
   const items = [
+    { label: 'TIME', value: clockTime(now), tone: gradient(0.9) },
     { label: 'RST', value: fc ? `${fc.daysToReset}d` : '--' },
+    ...(fc?.capAt ? [{ label: 'CAP', value: capDate(fc.capAt), tone: ALERT, state: 'alert' }] : []),
     { label: 'PACE', value: percent(fc?.pace) },
     { label: 'PROJ', value: percent(fc?.projected), tone: fc?.projected > 100 ? ALERT : INK },
     { label: 'AIC', value: compact(data.today) },
   ];
   if (data.remote !== undefined) items.push({ label: 'UBU', value: data.remote === null ? 'off' : compact(data.remote.credits) });
+  if (data.jira?.issues?.length) items.push({ label: 'JIRA', value: `${data.jira.issues.length}` });
   if (data.agents?.length) {
     items.push({ label: 'AG', value: `${data.agents.length} ${percent(Math.max(...data.agents.map((a) => a.context ?? 0)))}` });
   }
@@ -722,7 +968,7 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
   height = Math.max(1, Math.floor(height));
   const cv = new Canvas(width, height, color);
   if (width < 20 || height < 6) {
-    tinyView(cv, data);
+    tinyView(cv, data, now);
     return cv.toString();
   }
   const cols = Math.max(1, Math.floor(width / CELL_W));
@@ -732,10 +978,21 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
   const cellH = height / rows;
   const fc = data.forecast;
   const agents = data.agents ?? [];
-  const planW = cols <= 3 ? cols : Math.max(3, Math.round(cols * 0.55));
+  const planW = cols <= 2 ? cols : clamp(Math.round(cols * 0.55), 2, cols - 1);
+  const planH = rows >= 3 ? 2 : 1;
+  const trendW = Math.min(3, cols - planW);
+  const jiraRows = clamp(Math.ceil(((data.jira?.issues?.length ?? 0) + 2) / cellH), 1, Math.max(1, rows - planH));
   const agentRows = clamp(Math.ceil((agents.length + 2) / cellH), 1, rows);
+  // TREND sits right next to PLAN (same row), or directly under it when PLAN spans the width.
+  const risk = riskStatus(fc, data.today);
+  const trendShapes = trendW > 0 ? [[trendW, planH, planW, 0], [trendW, 1, planW, 0]] : [[cols, 1, 0, planH], [cols, 1, 0, 1]];
   const modules = [
-    { title: `PLAN ${planLabel(data.plan)}`, draw: planModule, shapes: [[planW, rows >= 3 ? 2 : 1], [planW, 1], [1, 1]] },
+    { title: (w) => [`PLAN ${planLabel(data.plan)}${risk ? ` · ${risk}` : ''}`, `PLAN ${planLabel(data.plan).replace('USED ', '')}${risk ? ` ${risk}` : ''}`]
+      .find((t) => t.length + 6 <= w) ?? `PLAN ${planLabel(data.plan)}`, draw: planModule, shapes: [[planW, planH], [planW, 1], [1, 1]] },
+    { title: 'TREND', draw: trendModule, shapes: [...trendShapes, [1, 1]] },
+    { id: 'clock', title: 'CLOCK', draw: clockModule, shapes: [[2, 1], [1, 1]] },
+    ...(data.jira ? [{ title: jiraTitle(data.jira), draw: jiraModule,
+      shapes: [[3, jiraRows], [2, jiraRows], [2, 1], [1, 1]] }] : []),
     ...(data.errors?.length ? [{ title: 'SYS', draw: sysModule, shapes: [[2, 1], [1, 1]] }] : []),
     { title: 'CYCLE', draw: cycleModule, shapes: [[2, 1], [1, 1]] },
     { title: 'TODAY', draw: todayModule, shapes: [[2, 1], [1, 1]] },
@@ -756,14 +1013,22 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
     for (let cy = 0; cy <= rows - h; cy++) for (let cx = 0; cx <= cols - w; cx++) if (free(cx, cy, w, h)) return [cx, cy];
     return null;
   };
+  const placed = new Set();
   for (const module of modules) {
-    for (const [w, h] of module.shapes) {
-      const spot = w <= cols && h <= rows ? find(w, h) : null;
+    for (const [w, h, ax, ay] of module.shapes) {
+      const spot = w > cols || h > rows ? null : ax === undefined ? find(w, h) : free(ax, ay, w, h) ? [ax, ay] : null;
       if (!spot) continue;
       const box = take(spot[0], spot[1], w, h);
-      module.draw(cv, frame(cv, box, module.title), data);
+      module.draw(cv, frame(cv, box, typeof module.title === 'function' ? module.title(box.w) : module.title), data, now);
+      placed.add(module.id ?? module.title);
       break;
     }
+  }
+  // No room for CLOCK: stamp HH:MM into the PLAN frame's bottom border so the time is always visible.
+  if (!placed.has('clock')) {
+    const stamp = ` ${clockTime(now)} `;
+    const right = xs[planW] - 3;
+    if (right - stamp.length >= 2) cv.text(right - stamp.length, ys[planH] - 1, stamp, gradient(0.9));
   }
   let previous = -1;
   for (let cy = 0; cy < rows; cy++) {
@@ -784,7 +1049,7 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
 // ---------- collection ----------
 
 export async function collect(telemetry, { now = Date.now(), remoteFile = process.env.BUDGET_REMOTE,
-  target = Number(process.env.BUDGET_TARGET) || 100 } = {}) {
+  target = Number(process.env.BUDGET_TARGET) || 100, jira } = {}) {
   const errors = [];
   const quota = await telemetry.newestQuota();
   const plan = quota ? planUsage(quota.snapshot, quota.observedAt, now) : null;
@@ -828,18 +1093,25 @@ export async function collect(telemetry, { now = Date.now(), remoteFile = proces
   }
   const agents = [
     ...(history?.active ?? sessions).map((a) => ({ label: a.label, context: a.context, model: a.model, effort: a.effort })),
-    ...(remote?.agents ?? []).map((a) => ({ label: String(a.label).slice(0, 12).trimEnd(), context: a.percent, ubuntu: true })),
+    ...(Array.isArray(remote?.agents) ? remote.agents : []).map((a) => ({ label: String(a.label).slice(0, 12).trimEnd(), context: a.percent, ubuntu: true })),
   ];
-  return { plan, today, remote, agents, forecast: forecast({ plan, history, now, target }), errors };
+  return { plan, today, remote, agents, forecast: forecast({ plan, history, now, target }), errors,
+    ...(jira ? { jira: { ...jira } } : {}) };
 }
 
 async function main() {
   const args = process.argv.slice(2);
   if (args.some((a) => !['--once', '--json'].includes(a))) throw new Error('Usage: node budget.mjs [--once] [--json]');
   const telemetry = new Telemetry(process.env.COPILOT_HOME || join(homedir(), '.copilot'));
-  if (args.includes('--json')) return console.log(JSON.stringify(await collect(telemetry), null, 2));
+  if (args.includes('--json')) {
+    const feed = process.env.BUDGET_JIRA === '0' ? null : new JiraFeed();
+    await feed?.refresh();
+    return console.log(JSON.stringify(await collect(telemetry, { jira: feed?.state }), null, 2));
+  }
   const interactive = process.stdout.isTTY && !args.includes('--once');
   let data = { plan: null, agents: [], errors: ['loading'] };
+  const feed = process.env.BUDGET_JIRA === '0' ? null : new JiraFeed();
+  if (feed && !interactive) await feed.refresh();
   // Every draw re-packs the grid from the current size; a size change also clears the screen.
   let drawnSize = '';
   // columns/rows are cached until SIGWINCH, which ConPTY hosts do not always deliver;
@@ -858,7 +1130,9 @@ async function main() {
     if (!interactive) return process.stdout.write(`${view}\n`);
     const clear = `${width}x${height}` !== drawnSize ? '\x1b[2J' : '';
     drawnSize = `${width}x${height}`;
-    process.stdout.write(`${clear}\x1b[H${view.split('\n').join('\x1b[K\r\n')}\x1b[J`);
+    // Rows are always exactly full width, so no EL/ED: after the last column the cursor sits in
+    // the pending-wrap state and an erase there would wipe the right border.
+    process.stdout.write(`${clear}\x1b[H${view.split('\n').join('\r\n')}`);
   };
   if (interactive) {
     process.stdout.write('\x1b[?1049h\x1b[?25l');
@@ -871,6 +1145,19 @@ async function main() {
       pending = globalThis.setTimeout(draw, 50);
     };
     process.stdout.on('resize', redraw);
+    if (feed) {
+      feed.onUpdate = () => {
+        data = { ...data, jira: { ...feed.state } };
+        redraw();
+      };
+      feed.start();
+    }
+    // Keep the clock minute-accurate independently of the data refresh.
+    const tick = () => globalThis.setTimeout(() => {
+      draw();
+      tick();
+    }, 60000 - Date.now() % 60000 + 50).unref();
+    tick();
     // ConPTY/tmux-style hosts do not always signal resizes, so poll the size as well.
     setInterval(() => {
       if (size().join('x') !== drawnSize) redraw();
@@ -878,7 +1165,7 @@ async function main() {
   }
   do {
     try {
-      data = await collect(telemetry);
+      data = await collect(telemetry, { jira: feed?.state });
     } catch (error) {
       data = { ...data, errors: [error.message] };
     }

@@ -283,7 +283,7 @@ const DIGITS = {
 };
 const SPARK = '▁▂▃▄▅▆▇█';
 const EIGHTHS = ' ▏▎▍▌▋▊▉';
-const STOPS = [[0, 'C5DEA6'], [0.35, 'A9DED4'], [0.6, 'A9CDD9'], [0.82, 'D9C6EB'], [1, 'F2A89B']]
+const STOPS = [[0, '134E4A'], [0.3, '2F7F78'], [0.6, '5FB3AB'], [0.85, '8FD3C9'], [1, 'C4F1EA']]
   .map(([at, hex]) => [at, [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))]);
 export const gradient = (t) => {
   t = clamp(t, 0, 1);
@@ -354,6 +354,37 @@ function bar(plan, fc, width, height, color) {
 export function render(data, width = 20, height = 40, now = Date.now(), { color = false } = {}) {
   width = Math.max(4, Math.floor(width));
   height = Math.max(1, Math.floor(height));
+  const fc = data.forecast;
+  // Wide panes split the metrics into columns (min 20 cells each) using the fewest columns that
+  // fit; whatever height is left goes to the bar.
+  // The % bar stays prominent: it keeps 5 rows (big numerals) whenever the pane has 10+ rows,
+  // and metrics wrap into columns or are trimmed before it shrinks further.
+  const barMin = height >= 10 ? 5 : 1;
+  const room = Math.max(0, height - barMin - 1);
+  const maxCols = Math.max(1, Math.floor((width + 1) / 21));
+  let cols = 1;
+  let cw = width;
+  let below = metrics(data, cw, color);
+  for (let n = 2; n <= maxCols && Math.ceil(below.length / (n - 1)) > room; n++) {
+    cols = n;
+    cw = Math.floor((width - (n - 1)) / n);
+    below = metrics(data, cw, color);
+  }
+  const per = Math.ceil(below.length / cols);
+  const shown = Math.min(per, room);
+  const footer = [];
+  for (let r = 0; r < shown; r++) {
+    const cells = [];
+    for (let c = 0; c < cols; c++) cells.push(below[c * per + r] ?? ' '.repeat(cw));
+    footer.push(cells.join(' ') + ' '.repeat(width - cols * cw - (cols - 1)));
+  }
+  const gap = footer.length && height - footer.length >= 2 ? 1 : 0;
+  const barHeight = Math.min(Math.max(barMin, 9), height - footer.length - gap);
+  const pad = Array(height - footer.length - gap - barHeight).fill(' '.repeat(width));
+  return [...bar(data.plan, fc, width, barHeight, color), ...(gap ? [' '.repeat(width)] : []), ...footer, ...pad].join('\n');
+}
+
+function metrics(data, width, color) {
   const paint = (code, text) => color ? `\x1b[38;2;${code}m${text}\x1b[0m` : text;
   const row = (label, value, tone = INK, labelTone = DIM) => {
     value = value.slice(0, width - 1);
@@ -396,14 +427,7 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
     const tag = a.model ? `${shortModel(a.model).slice(0, 7)}${a.effort ? `·${a.effort[0]}` : ''} ` : '';
     below.push(gauge(a.context, tag.length <= width - 3 ? tag : ''));
   }
-  // Metrics keep priority as the pane shrinks: the bar gives up rows first, down to one,
-  // then the separator goes, and only then are trailing rows (agents, forecast) dropped.
-  // The bar takes at most 7 rows so spare height stays with the metrics.
-  const footer = below.slice(0, Math.max(0, height - 1));
-  const gap = footer.length && height - footer.length >= 2 ? 1 : 0;
-  const barHeight = Math.min(7, height - footer.length - gap);
-  const pad = Array(height - footer.length - gap - barHeight).fill(' '.repeat(width));
-  return [...bar(data.plan, fc, width, barHeight, color), ...(gap ? [' '.repeat(width)] : []), ...footer, ...pad].join('\n');
+  return below;
 }
 
 // ---------- collection ----------
@@ -476,6 +500,12 @@ async function main() {
     process.once('SIGINT', () => process.exit(0));
     process.once('SIGTERM', () => process.exit(0));
     process.stdout.on('resize', draw);
+    // ConPTY/tmux-style hosts do not always signal resizes, so poll the size as well.
+    let size = '';
+    setInterval(() => {
+      const next = `${process.stdout.columns}x${process.stdout.rows}`;
+      if (next !== size) { size = next; draw(); }
+    }, 250).unref();
   }
   do {
     try {

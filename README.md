@@ -47,3 +47,8 @@ Open Settings → Open JSON file, then:
 
 1. Add the object from `windows-terminal/zen-scheme.json` to the `schemes` array.
 2. Merge `windows-terminal/profile-defaults.json` into the top level (or just set `"colorScheme": "Zen"` on your WSL profile).
+
+## Plugins
+
+- [copilot-budget](plugins/copilot-budget/README.md): Copilot CLI plan usage and forecast pane.
+

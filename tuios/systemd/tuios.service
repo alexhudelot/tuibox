@@ -1,0 +1,15 @@
+[Unit]
+Description=TUIOS daemon (restores sessions, resumes agents)
+After=default.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/tuios daemon
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

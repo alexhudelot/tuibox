@@ -1,0 +1,23 @@
+{
+    "name": "Zen",
+    "background": "#12201D",
+    "foreground": "#C5DCCB",
+    "cursorColor": "#7FC8A9",
+    "selectionBackground": "#2C4A43",
+    "black": "#1B2E2A",
+    "red": "#C98A7D",
+    "green": "#8FBC8B",
+    "yellow": "#C9C08F",
+    "blue": "#6FA8A6",
+    "purple": "#9AA98C",
+    "cyan": "#6CC4B4",
+    "white": "#B9CFC0",
+    "brightBlack": "#5F7D74",
+    "brightRed": "#DBA08F",
+    "brightGreen": "#A9D3A0",
+    "brightYellow": "#DCD4A5",
+    "brightBlue": "#8CC3BF",
+    "brightPurple": "#B4C4A4",
+    "brightCyan": "#8DDCCB",
+    "brightWhite": "#E6F2E6"
+}

@@ -1,0 +1,12 @@
+{
+    "profiles": {
+        "defaults": {
+            "colorScheme": "Zen",
+            "antialiasingMode": "cleartype",
+            "opacity": 94,
+            "useAcrylic": true
+        }
+    },
+    "useAcrylicInTabRow": true,
+    "rendering.graphicsAPI": "direct3d11"
+}

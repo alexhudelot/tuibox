@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // copilot-budget: a narrow tuios/herdr pane for GitHub Copilot CLI plan usage.
-// node budget.mjs [--once] [--json]
+// node budget.mjs [--once] [--json|--dock]
 // Reads local Copilot telemetry only (~/.copilot); no model calls, credentials or network.
 import { execFile } from 'node:child_process';
-import { open, readdir, readFile, stat } from 'node:fs/promises';
+import { open, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -1048,6 +1048,16 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
 
 // ---------- collection ----------
 
+// One short line for a tuios dock cell: "AIC 42% →198% RISK".
+export function dockLine(data) {
+  const used = data?.plan?.usedPercent;
+  if (!finite(used)) return 'AIC --';
+  const fc = data.forecast;
+  const status = riskStatus(fc, data.today);
+  return ['AIC ' + Math.round(used) + '%', finite(fc?.projected) ? '→' + Math.round(fc.projected) + '%' : '',
+    status && status !== 'OK' ? status : ''].filter(Boolean).join(' ');
+}
+
 export async function collect(telemetry, { now = Date.now(), remoteFile = process.env.BUDGET_REMOTE,
   target = Number(process.env.BUDGET_TARGET) || 100, jira } = {}) {
   const errors = [];
@@ -1116,6 +1126,7 @@ export async function loadSettings(env = process.env, home = env.COPILOT_HOME ||
     jira: String(pick('jira', 'BUDGET_JIRA') ?? '1') !== '0' && pick('jira', 'BUDGET_JIRA') !== false,
     refreshMs: Number(pick('refreshMs', 'BUDGET_REFRESH_MS')) || 30000,
     session: pick('session', 'TUIOS_SESSION') || env.TUIOS_PLUGIN_SESSION,
+    export: pick('export', 'BUDGET_EXPORT') || undefined,
   };
 }
 
@@ -1148,12 +1159,13 @@ export function sizeSource(stream, { onChange, interval = 250, refresh = typeof 
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.some((a) => !['--once', '--json'].includes(a))) throw new Error('Usage: node budget.mjs [--once] [--json]');
+  if (args.some((a) => !['--once', '--json', '--dock'].includes(a))) throw new Error('Usage: node budget.mjs [--once] [--json|--dock]');
   const settings = await loadSettings();
   if (settings.session) process.env.TUIOS_SESSION ??= settings.session;
   const telemetry = new Telemetry(settings.home);
   const options = { remoteFile: settings.remote, target: settings.target };
   const feed = settings.jira ? new JiraFeed() : null;
+  if (args.includes('--dock')) return console.log(dockLine(await collect(telemetry, options)));
   if (args.includes('--json')) {
     await feed?.refresh();
     return console.log(JSON.stringify(await collect(telemetry, { ...options, jira: feed?.state }), null, 2));
@@ -1206,6 +1218,11 @@ async function main() {
       data = { ...data, errors: [error.message] };
     }
     draw();
+    // Snapshot for consumers without Node (Ubuntu container budget.py); atomic so readers never see half a file.
+    if (settings.export && data.plan) {
+      await writeFile(settings.export + '.tmp', JSON.stringify({ ...data, at: new Date().toISOString() }))
+        .then(() => rename(settings.export + '.tmp', settings.export)).catch(() => {});
+    }
     if (interactive) await setTimeout(settings.refreshMs);
   } while (interactive);
 }

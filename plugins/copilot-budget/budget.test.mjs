@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
+import { dockLine, clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
 
 const strip = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 const data = { plan: { usedPercent: 50 }, forecast: null, extras: null };
@@ -279,7 +279,7 @@ test('loadSettings: file defaults, env overrides, missing file ok', async (t) =>
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
   const dir = await mkdtemp(new URL('./.test-', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  assert.deepEqual(await loadSettings({}, dir), { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined });
+  assert.deepEqual(await loadSettings({}, dir), { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined, export: undefined });
   await writeFile(`${dir}/copilot-budget.json`, JSON.stringify({ remote: 'r.json', target: 80, jira: false, session: 'sherpa' }));
   const s = await loadSettings({ BUDGET_TARGET: '90' }, dir);
   assert.equal(s.remote, 'r.json');
@@ -310,4 +310,10 @@ test('sizeSource: resize events, refresh polling, failing refresh degrades to ev
   assert.deepEqual(events.get(), [50, 10]);
   assert.equal(seen.at(-1), '50x10');
   events.stop();
+});
+
+test('dockLine: short status for dock cells', () => {
+  assert.equal(dockLine({ plan: null }), 'AIC --');
+  assert.equal(dockLine({ plan: { usedPercent: 41.6 }, forecast: { projected: 198, capAt: 1, target: 100 } }), 'AIC 42% →198% RISK');
+  assert.equal(dockLine({ plan: { usedPercent: 10 }, forecast: { projected: 50, target: 100, used: 10, pace: 20, dailyTarget: 5 }, today: 1 }), 'AIC 10% →50%');
 });

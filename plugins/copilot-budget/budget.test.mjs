@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dockLine, clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
+import { setPalette, themePalette, dockLine, clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
 
 const strip = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 const data = { plan: { usedPercent: 50 }, forecast: null, extras: null };
@@ -279,7 +279,10 @@ test('loadSettings: file defaults, env overrides, missing file ok', async (t) =>
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
   const dir = await mkdtemp(new URL('./.test-', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  assert.deepEqual(await loadSettings({}, dir), { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined, export: undefined });
+  const { themesDir, ...defaults } = await loadSettings({}, dir);
+  assert.match(themesDir, /themes$/);
+  assert.deepEqual(defaults, { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined, export: undefined, theme: 'zen' });
+  assert.equal((await loadSettings({ BUDGET_THEME: 'mono' }, dir)).theme, 'mono');
   await writeFile(`${dir}/copilot-budget.json`, JSON.stringify({ remote: 'r.json', target: 80, jira: false, session: 'sherpa' }));
   const s = await loadSettings({ BUDGET_TARGET: '90' }, dir);
   assert.equal(s.remote, 'r.json');
@@ -316,4 +319,27 @@ test('dockLine: short status for dock cells', () => {
   assert.equal(dockLine({ plan: null }), 'AIC --');
   assert.equal(dockLine({ plan: { usedPercent: 41.6 }, forecast: { projected: 198, capAt: 1, target: 100 } }), 'AIC 42% →198% RISK');
   assert.equal(dockLine({ plan: { usedPercent: 10 }, forecast: { projected: 50, target: 100, used: 10, pace: 20, dailyTarget: 5 }, today: 1 }), 'AIC 10% →50%');
+});
+
+test('themes: panel renders every palette with exact dimensions; palette reaches the output', async () => {
+  const { listThemes, THEMES_DIR } = await import('../../themes/themes.mjs');
+  const strip = (s) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+  const names = listThemes();
+  assert.ok(names.length >= 4);
+  try {
+    for (const name of names) {
+      const palette = await themePalette(name, THEMES_DIR);
+      setPalette(palette);
+      for (const [w, h] of [[1, 1], [19, 5], [20, 6], [32, 69], [80, 24], [164, 23]]) {
+        const lines = strip(render(full, w, h, NOW, { color: true })).split('\n');
+        assert.equal(lines.length, h, `${name} ${w}x${h}`);
+        for (const l of lines) assert.equal([...l].length, w, `${name} ${w}x${h}`);
+      }
+      const bg = palette.bg.slice(1).match(/../g).map((x) => parseInt(x, 16)).join(';');
+      assert.ok(render(full, 80, 24, NOW, { color: true }).includes(`48;2;${bg}`), `${name} bg used`);
+    }
+    assert.deepEqual(await themePalette('no-such-theme', THEMES_DIR), {});
+  } finally {
+    setPalette();
+  }
 });

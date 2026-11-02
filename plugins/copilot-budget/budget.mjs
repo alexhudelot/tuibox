@@ -5,10 +5,10 @@
 import { execFile } from 'node:child_process';
 import { open, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
@@ -307,34 +307,42 @@ const DIGITS = {
 };
 const SPARK = '▁▂▃▄▅▆▇█';
 const EIGHTHS = ' ▏▎▍▌▋▊▉';
-const STOPS = [[0, '134E4A'], [0.3, '2F7F78'], [0.6, '5FB3AB'], [0.85, '8FD3C9'], [1, 'C4F1EA']]
-  .map(([at, hex]) => [at, [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))]);
+const rgb = (hex) => [0, 2, 4].map((i) => parseInt(String(hex).replace('#', '').slice(i, i + 2), 16));
+const triple = (hex) => rgb(hex).join(';');
+// Default palette = theme "zen". Themes override it through setPalette() (themes/<name>/theme.json "panel").
+export const DEFAULT_PALETTE = {
+  gradient: ['#134E4A', '#2F7F78', '#5FB3AB', '#8FD3C9', '#C4F1EA'], slate: ['#242A30', '#76828E'],
+  bg: '#061214', track: '#262C2F', rule: '#1E3436', ink: '#FFF8E8', inkOnFill: '#15181A', dim: '#7FA3A0',
+  watch: '#F2C878', risk: '#F28C78', ubuntu: '#C8834A', gradientAt: [0, 0.3, 0.6, 0.85, 1],
+};
+let STOPS, SLATE, BG, TRACK, RULE, INK, INK_ON_FILL, DIM, AMBER, ALERT, UBUNTU, CALM, LEDS, STATUS, JIRA_TONE;
 export const gradient = (t) => {
   t = clamp(t, 0, 1);
   const i = Math.max(1, STOPS.findIndex(([at]) => at >= t));
   const [[a, from], [b, to]] = [STOPS[i - 1], STOPS[i]];
   return from.map((c, j) => Math.round(c + (to[j] - c) * (t - a) / (b - a))).join(';');
 };
-const BG = '6;18;20';
-const TRACK = '38;44;47';
-const RULE = '30;52;54';
-const INK = '255;248;232';
-const INK_ON_FILL = '21;24;26';
-const DIM = '127;163;160';
-const AMBER = '242;200;120';
-const ALERT = '242;140;120';
-const UBUNTU = '200;131;74';
-const CALM = gradient(0.55);
-const LEDS = { ok: CALM, warn: AMBER, alert: ALERT };
 // Decorative modules use a muted slate family so they never read as data.
-const SLATE = [[0, [36, 42, 48]], [1, [118, 130, 142]]];
 export const slate = (t) => {
   t = clamp(t, 0, 1);
-  const [[, from], [, to]] = SLATE;
+  const [from, to] = SLATE;
   return from.map((c, j) => Math.round(c + (to[j] - c) * t)).join(';');
 };
-const STATUS = { OK: { state: 'ok', tone: CALM, mark: '' }, WATCH: { state: 'warn', tone: AMBER, mark: '~' },
-  RISK: { state: 'alert', tone: ALERT, mark: '!' } };
+export function setPalette(palette = {}) {
+  const p = { ...DEFAULT_PALETTE, ...palette };
+  const at = palette.gradient && !palette.gradientAt ? null : p.gradientAt;
+  STOPS = p.gradient.map((hex, i) => [at?.length === p.gradient.length ? at[i] : i / (p.gradient.length - 1), rgb(hex)]);
+  SLATE = p.slate.map(rgb);
+  [BG, TRACK, RULE, INK, INK_ON_FILL, DIM, AMBER, ALERT, UBUNTU] =
+    [p.bg, p.track, p.rule, p.ink, p.inkOnFill, p.dim, p.watch, p.risk, p.ubuntu].map(triple);
+  CALM = gradient(0.55);
+  LEDS = { ok: CALM, warn: AMBER, alert: ALERT };
+  STATUS = { OK: { state: 'ok', tone: CALM, mark: '' }, WATCH: { state: 'warn', tone: AMBER, mark: '~' },
+    RISK: { state: 'alert', tone: ALERT, mark: '!' } };
+  JIRA_TONE = { todo: DIM, progress: gradient(0.6), review: AMBER };
+  return p;
+}
+setPalette();
 const capDate = (time) => new Date(time).toISOString().slice(5, 10);
 const CELL_W = 12;
 const CELL_H = 5;
@@ -739,7 +747,6 @@ function clockModule(cv, b, data, now) {
 
 const JIRA_STATE = (issue) => /review|block/i.test(issue.status) ? 'review'
   : issue.category === 'indeterminate' ? 'progress' : 'todo';
-const JIRA_TONE = { todo: DIM, progress: gradient(0.6), review: AMBER };
 
 export const jiraTitle = (jira) => jira.off ? 'JIRA · off'
   : `JIRA${jira.sprint ? ` · ${safeText(jira.sprint)}` : ''}${jira.stale ? ' · stale' : ''}`;
@@ -1111,6 +1118,15 @@ export async function collect(telemetry, { now = Date.now(), remoteFile = proces
 
 // Settings: <COPILOT_HOME>/copilot-budget.json (or BUDGET_CONFIG), overridden by environment variables,
 // so the plugin manifest can start the pane without a wrapper setting env vars.
+// Panel palette from themes/<name>/theme.json "panel"; unknown or unreadable themes fall back to zen.
+export async function themePalette(name, dir) {
+  try {
+    return JSON.parse(await readFile(join(dir, name, 'theme.json'), 'utf8')).panel ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export async function loadSettings(env = process.env, home = env.COPILOT_HOME || join(homedir(), '.copilot')) {
   let file = {};
   try {
@@ -1127,6 +1143,8 @@ export async function loadSettings(env = process.env, home = env.COPILOT_HOME ||
     refreshMs: Number(pick('refreshMs', 'BUDGET_REFRESH_MS')) || 30000,
     session: pick('session', 'TUIOS_SESSION') || env.TUIOS_PLUGIN_SESSION,
     export: pick('export', 'BUDGET_EXPORT') || undefined,
+    theme: pick('theme', 'BUDGET_THEME') || 'zen',
+    themesDir: pick('themesDir', 'BUDGET_THEMES_DIR') || join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'themes'),
   };
 }
 
@@ -1211,7 +1229,14 @@ async function main() {
     }, 60000 - Date.now() % 60000 + 50).unref();
     tick();
   }
+  let themeKey = '';
   do {
+    // Re-read settings each refresh so "themes/apply" switches the palette without a restart.
+    const live = await loadSettings().catch(() => settings);
+    if (`${live.themesDir}|${live.theme}` !== themeKey) {
+      themeKey = `${live.themesDir}|${live.theme}`;
+      setPalette(await themePalette(live.theme, live.themesDir));
+    }
     try {
       data = await collect(telemetry, { ...options, jira: feed?.state });
     } catch (error) {

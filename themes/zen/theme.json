@@ -1,0 +1,50 @@
+{
+  "name": "zen",
+  "description": "Calm high-contrast teal (default). Ubuntu: deeper blue background, copper borders.",
+  "default": true,
+  "windows": {
+    "tuios": "windows.json",
+    "wtScheme": "Zen",
+    "borders": {
+      "border_focused_gradient": "#134e4a #2f7f78 #6fb7ad",
+      "border_unfocused_color": "#1f4a46"
+    }
+  },
+  "ubuntu": {
+    "tuios": "ubuntu.json",
+    "wtScheme": "Zen Ubuntu",
+    "borders": {
+      "border_focused_gradient": "#7a4a24 #c8834a #f0c08c",
+      "border_unfocused_color": "#5a4030"
+    }
+  },
+  "panel": {
+    "gradient": [
+      "#134E4A",
+      "#2F7F78",
+      "#5FB3AB",
+      "#8FD3C9",
+      "#C4F1EA"
+    ],
+    "gradientAt": [
+      0,
+      0.3,
+      0.6,
+      0.85,
+      1
+    ],
+    "slate": [
+      "#242A30",
+      "#76828E"
+    ],
+    "bg": "#061214",
+    "track": "#262C2F",
+    "rule": "#1E3436",
+    "ink": "#FFF8E8",
+    "inkOnFill": "#15181A",
+    "dim": "#7FA3A0",
+    "watch": "#F2C878",
+    "risk": "#F28C78",
+    "ubuntu": "#C8834A"
+  }
+}

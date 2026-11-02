@@ -1,0 +1,34 @@
+{
+  "id": "zen",
+  "dark": true,
+  "fg": "#F4FFFC",
+  "bg": "#061214",
+  "cursor": "#8FD3C9",
+  "black": "#13292c",
+  "red": "#f2998a",
+  "green": "#6FBF9F",
+  "yellow": "#f0d98c",
+  "blue": "#4F8FA3",
+  "purple": "#b8a8f0",
+  "cyan": "#5FB3AB",
+  "white": "#d4e8e4",
+  "bright_black": "#9CC4C0",
+  "bright_red": "#ffb3a6",
+  "bright_green": "#9AD8BE",
+  "bright_yellow": "#fbe7a8",
+  "bright_blue": "#7FB4C4",
+  "bright_purple": "#d0c4fa",
+  "bright_cyan": "#8FD3C9",
+  "bright_white": "#FFFFFF",
+  "chrome": {
+    "accent": "cyan",
+    "border": {
+      "unfocused": "bright_black"
+    },
+    "dots": {
+      "close": "blue",
+      "minimize": "cyan",
+      "zoom": "bright_cyan"
+    }
+  }
+}

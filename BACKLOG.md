@@ -14,7 +14,7 @@ _(empty: the Now items of 2026-11-02 shipped, see Done)_
   AC: the pane is started through the plugin manifest (TB-022) or a documented launcher that ctrl+c stops; the live check can target the PLAN pane.
 - **TB-022 Install and enable the plugin with `tuios plugins link/install`** (improvement). Replaces the manual pane start.
   AC: `tuios plugins link plugins/copilot-budget` (dev) and `install` (release) open the budget pane with env (`TUIOS_SESSION`, `BUDGET_REMOTE`) from config; the README shows both.
-- **TB-023 Restore the sherpa layout after live checks** (fix). The temporary BUDGETTEST window changed the tiling (left column went from 82 to 140 columns, UBUNTU-TUIOS from 122 to 85). The user's preferred layout has PLAN about 66 wide under SHERPA on the left and UBUNTU-TUIOS on the right.
+- **TB-023 Restore the sherpa layout after live checks** (fix). Partly superseded by TB-017's portrait layout. The temporary BUDGETTEST window changed the tiling (left column went from 82 to 140 columns, UBUNTU-TUIOS from 122 to 85). The user's preferred layout has PLAN about 66 wide under SHERPA on the left and UBUNTU-TUIOS on the right.
   AC: a scripted, reversible way to set and restore split ratios (for example, a saved layout); after any live test the layout matches the one before it.
 - **TB-024 README and install.sh for the current setup** (fix). The README still describes WSL2 + Claude Code.
   AC: the README covers the Windows `sherpa` session, the Ubuntu container session, docks, WT schemes and the copilot-budget plugin; `install.sh`, plus a `install.ps1` for Windows, installs themes and config and links the plugin; `claude-week.sh` is marked legacy or replaced.

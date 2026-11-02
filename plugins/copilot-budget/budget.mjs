@@ -985,7 +985,7 @@ export function render(data, width = 20, height = 40, now = Date.now(), { color 
   const agentRows = clamp(Math.ceil((agents.length + 2) / cellH), 1, rows);
   // TREND sits right next to PLAN (same row), or directly under it when PLAN spans the width.
   const risk = riskStatus(fc, data.today);
-  const trendShapes = trendW > 0 ? [[trendW, planH, planW, 0], [trendW, 1, planW, 0]] : [[cols, 1, 0, planH], [cols, 1, 0, 1]];
+  const trendShapes = trendW > 0 ? [[trendW, planH, planW, 0], [trendW, 1, planW, 0]] : [[cols, rows >= 10 ? 2 : 1, 0, planH], [cols, 1, 0, planH], [cols, 1, 0, 1]];
   const modules = [
     { title: (w) => [`PLAN ${planLabel(data.plan)}${risk ? ` · ${risk}` : ''}`, `PLAN ${planLabel(data.plan).replace('USED ', '')}${risk ? ` ${risk}` : ''}`]
       .find((t) => t.length + 6 <= w) ?? `PLAN ${planLabel(data.plan)}`, draw: planModule, shapes: [[planW, planH], [planW, 1], [1, 1]] },

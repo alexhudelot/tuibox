@@ -263,3 +263,14 @@ test('JiraFeed keeps the last result, flags stale and off, never throws', async 
   await missing.refresh();
   assert.equal(missing.state.off, true);
 });
+
+test('portrait column stacks PLAN, TREND (with sparkline), CLOCK at the top', () => {
+  for (const [w, h] of [[34, 69], [30, 60], [35, 80]]) {
+    const lines = render(full, w, h, NOW).split('\n');
+    const row = (t) => lines.findIndex((l) => l.includes(` ${t} `) || l.includes(` ${t}`));
+    assert.ok(row('PLAN') === 0 && row('PLAN') < row('TREND') && row('TREND') < row('CLOCK'), `${w}x${h} order`);
+    const trend = lines.slice(row('TREND'), row('CLOCK')).join('\n');
+    assert.match(trend, /14d/, `${w}x${h} sparkline`);
+    assert.match(trend, /WATCH/);
+  }
+});

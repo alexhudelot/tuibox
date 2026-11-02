@@ -1099,33 +1099,74 @@ export async function collect(telemetry, { now = Date.now(), remoteFile = proces
     ...(jira ? { jira: { ...jira } } : {}) };
 }
 
+// Settings: <COPILOT_HOME>/copilot-budget.json (or BUDGET_CONFIG), overridden by environment variables,
+// so the plugin manifest can start the pane without a wrapper setting env vars.
+export async function loadSettings(env = process.env, home = env.COPILOT_HOME || join(homedir(), '.copilot')) {
+  let file = {};
+  try {
+    file = JSON.parse(await readFile(env.BUDGET_CONFIG || join(home, 'copilot-budget.json'), 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw new Error(`config: ${error.message}`);
+  }
+  const pick = (key, name) => env[name] !== undefined && env[name] !== '' ? env[name] : file[key];
+  return {
+    home,
+    remote: pick('remote', 'BUDGET_REMOTE') || undefined,
+    target: Number(pick('target', 'BUDGET_TARGET')) || 100,
+    jira: String(pick('jira', 'BUDGET_JIRA') ?? '1') !== '0' && pick('jira', 'BUDGET_JIRA') !== false,
+    refreshMs: Number(pick('refreshMs', 'BUDGET_REFRESH_MS')) || 30000,
+    session: pick('session', 'TUIOS_SESSION') || env.TUIOS_PLUGIN_SESSION,
+  };
+}
+
+// Terminal size with change notification. Public path: 'resize' events (SIGWINCH). ConPTY hosts do
+// not always deliver those, so when the stream offers a refresh hook (Node's tty _refreshSize, feature
+// detected and disabled after the first failure) it is polled as well. Without it, events only.
+export function sizeSource(stream, { onChange, interval = 250, refresh = typeof stream._refreshSize === 'function'
+  ? () => stream._refreshSize() : null } = {}) {
+  const read = () => [stream.columns || 20, stream.rows || 40];
+  let last = read().join('x');
+  const check = () => {
+    if (refresh) {
+      try {
+        refresh();
+      } catch {
+        refresh = null;
+      }
+    }
+    const now = read().join('x');
+    if (now !== last) {
+      last = now;
+      onChange?.(read());
+    }
+  };
+  stream.on?.('resize', check);
+  const timer = refresh ? setInterval(check, interval) : null;
+  timer?.unref?.();
+  return { get: () => (check(), read()), stop: () => { clearInterval(timer); stream.off?.('resize', check); }, polling: () => !!refresh };
+}
+
 async function main() {
   const args = process.argv.slice(2);
   if (args.some((a) => !['--once', '--json'].includes(a))) throw new Error('Usage: node budget.mjs [--once] [--json]');
-  const telemetry = new Telemetry(process.env.COPILOT_HOME || join(homedir(), '.copilot'));
+  const settings = await loadSettings();
+  if (settings.session) process.env.TUIOS_SESSION ??= settings.session;
+  const telemetry = new Telemetry(settings.home);
+  const options = { remoteFile: settings.remote, target: settings.target };
+  const feed = settings.jira ? new JiraFeed() : null;
   if (args.includes('--json')) {
-    const feed = process.env.BUDGET_JIRA === '0' ? null : new JiraFeed();
     await feed?.refresh();
-    return console.log(JSON.stringify(await collect(telemetry, { jira: feed?.state }), null, 2));
+    return console.log(JSON.stringify(await collect(telemetry, { ...options, jira: feed?.state }), null, 2));
   }
   const interactive = process.stdout.isTTY && !args.includes('--once');
   let data = { plan: null, agents: [], errors: ['loading'] };
-  const feed = process.env.BUDGET_JIRA === '0' ? null : new JiraFeed();
   if (feed && !interactive) await feed.refresh();
   // Every draw re-packs the grid from the current size; a size change also clears the screen.
   let drawnSize = '';
-  // columns/rows are cached until SIGWINCH, which ConPTY hosts do not always deliver;
-  // _refreshSize() re-queries the console handle (and emits 'resize' when it changed).
-  const size = () => {
-    try {
-      process.stdout._refreshSize?.();
-    } catch {
-      // Not a TTY.
-    }
-    return [process.stdout.columns || 20, process.stdout.rows || 40];
-  };
+  let redraw = () => {};
+  const size = sizeSource(process.stdout, { onChange: () => redraw() });
   const draw = () => {
-    const [width, height] = size();
+    const [width, height] = size.get();
     const view = render(data, width, height, Date.now(), { color: interactive && !Object.hasOwn(process.env, 'NO_COLOR') });
     if (!interactive) return process.stdout.write(`${view}\n`);
     const clear = `${width}x${height}` !== drawnSize ? '\x1b[2J' : '';
@@ -1140,11 +1181,10 @@ async function main() {
     process.once('SIGINT', () => process.exit(0));
     process.once('SIGTERM', () => process.exit(0));
     let pending = null;
-    const redraw = () => {
+    redraw = () => {
       clearTimeout(pending);
       pending = globalThis.setTimeout(draw, 50);
     };
-    process.stdout.on('resize', redraw);
     if (feed) {
       feed.onUpdate = () => {
         data = { ...data, jira: { ...feed.state } };
@@ -1158,22 +1198,17 @@ async function main() {
       tick();
     }, 60000 - Date.now() % 60000 + 50).unref();
     tick();
-    // ConPTY/tmux-style hosts do not always signal resizes, so poll the size as well.
-    setInterval(() => {
-      if (size().join('x') !== drawnSize) redraw();
-    }, 250).unref();
   }
   do {
     try {
-      data = await collect(telemetry, { jira: feed?.state });
+      data = await collect(telemetry, { ...options, jira: feed?.state });
     } catch (error) {
       data = { ...data, errors: [error.message] };
     }
     draw();
-    if (interactive) await setTimeout(Number(process.env.BUDGET_REFRESH_MS) || 30000);
+    if (interactive) await setTimeout(settings.refreshMs);
   } while (interactive);
 }
-
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error) => {
     console.error(`copilot-budget: ${error.message}`);

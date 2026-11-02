@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clockDate, clockTime, collect, forecast, JiraFeed, parseJira, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
+import { clockDate, clockTime, collect, forecast, JiraFeed, loadSettings, parseJira, sizeSource, gradient, planUsage, render, riskStatus, slate, Telemetry, workdaysBetween } from './budget.mjs';
 
 const strip = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 const data = { plan: { usedPercent: 50 }, forecast: null, extras: null };
@@ -273,4 +273,41 @@ test('portrait column stacks PLAN, TREND (with sparkline), CLOCK at the top', ()
     assert.match(trend, /14d/, `${w}x${h} sparkline`);
     assert.match(trend, /WATCH/);
   }
+});
+
+test('loadSettings: file defaults, env overrides, missing file ok', async (t) => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const dir = await mkdtemp(new URL('./.test-', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  assert.deepEqual(await loadSettings({}, dir), { home: dir, remote: undefined, target: 100, jira: true, refreshMs: 30000, session: undefined });
+  await writeFile(`${dir}/copilot-budget.json`, JSON.stringify({ remote: 'r.json', target: 80, jira: false, session: 'sherpa' }));
+  const s = await loadSettings({ BUDGET_TARGET: '90' }, dir);
+  assert.equal(s.remote, 'r.json');
+  assert.equal(s.target, 90);
+  assert.equal(s.jira, false);
+  assert.equal(s.session, 'sherpa');
+  assert.equal((await loadSettings({ BUDGET_JIRA: '0' }, dir)).jira, false);
+  await writeFile(`${dir}/copilot-budget.json`, '{bad');
+  await assert.rejects(loadSettings({}, dir), /config:/);
+});
+
+test('sizeSource: resize events, refresh polling, failing refresh degrades to events', async () => {
+  const { EventEmitter } = await import('node:events');
+  const stream = Object.assign(new EventEmitter(), { columns: 80, rows: 24 });
+  const seen = [];
+  let fresh = [80, 24];
+  const src = sizeSource(stream, { onChange: (s) => seen.push(s.join('x')), interval: 5,
+    refresh: () => { [stream.columns, stream.rows] = fresh; } });
+  fresh = [34, 69];
+  await new Promise((r) => globalThis.setTimeout(r, 30));
+  assert.deepEqual(seen, ['34x69']);
+  src.stop();
+  const plain = Object.assign(new EventEmitter(), { columns: 10, rows: 10 });
+  const events = sizeSource(plain, { onChange: (s) => seen.push(s.join('x')), refresh: () => { throw new Error('gone'); } });
+  plain.columns = 50;
+  plain.emit('resize');
+  assert.equal(events.polling(), false);
+  assert.deepEqual(events.get(), [50, 10]);
+  assert.equal(seen.at(-1), '50x10');
+  events.stop();
 });

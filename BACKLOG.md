@@ -56,6 +56,8 @@ Out of scope: Lucid diagrams and other non-tuibox work.
 
 - **TB-017** Portrait overview panel (2026-11-02): PLAN was recreated as a full-height right-edge column with `split-window right -w UBUNTU-TUIOS --name PLAN`, then sized with `resize_width_10` plus 3× `resize_master_grow` (4 cols each). The panel restarted from the worktree, which also removed the old restart loop. Layout: SHERPA 67x69 | UBUNTU-TUIOS 123x69 | PLAN 34x69. In portrait, TREND gets 2 cells so the big projection and sparkline fit.
   AC: portrait test (PLAN → TREND → CLOCK order, sparkline shown); live capture verified.
+- **TB-075** Restore sherpa overview panel (2026-11-03): reran `tuios/layouts/sherpa-portrait.ps1 -Session sherpa -StartPanel` from this worktree. Live order/state is SHERPA | UBUNTU-TUIOS | PLAN, with PLAN at the full-height right edge (32x46) running the copilot-budget overview (capture shows PLAN, TREND, CLOCK, Jira, and forecast modules).
+  AC: PLAN is rightmost and at least 32 columns wide; overview renderer is running and visible in `tuios capture-pane`.
 
 - **TB-001** Horizontal teal plan bar with pace `│` and projection `┆` markers (57719cd).
 - **TB-002** Monthly forecast: EWMA burn, model/effort MIX, context CTX, cap ETA, daily target (57719cd).

@@ -1289,6 +1289,83 @@ function dimension(cv, x, y, len, label, tone) {
   else cv.text(x + len + 1, y, label, INK);
 }
 
+// Multi-row bar chart with a peak label on top and a day axis at the bottom (h >= 3).
+function barChart(cv, b, trend) {
+  const chartH = b.h - 1;
+  const values = trend.slice(-Math.max(1, b.w - 5));
+  const peak = Math.max(...values, 1);
+  const left = b.x + b.w - values.length;
+  const pk = compact(peak);
+  cv.text(b.x, b.y, pk.slice(0, 4), DIM);
+  cv.text(b.x, b.y + chartH - 1, '0', DIM);
+  for (let r = 0; r < chartH; r++) cv.put(left - 1, b.y + r, '┤', DIM);
+  values.forEach((v, i) => {
+    const units = v > 0 ? Math.max(1, Math.round(v / peak * chartH * 8)) : 0;
+    for (let r = 0; r < chartH; r++) {
+      const fill = units - r * 8;
+      const y = b.y + chartH - 1 - r;
+      if (fill <= 0) { if (r === 0) cv.put(left + i, y, '·', TRACK); continue; }
+      cv.put(left + i, y, fill >= 8 ? '█' : SPARK[fill - 1], gradient(0.35 + 0.6 * r / Math.max(1, chartH)));
+    }
+  });
+  const y = b.y + chartH;
+  for (let x = left - 1; x < b.x + b.w; x++) cv.put(x, y, '─', DIM);
+  cv.put(left - 1, y, '└', DIM);
+  const label = `-${values.length}d`;
+  cv.text(left, y, label, DIM);
+  if (b.w - (left - b.x) > label.length + 4) cv.text(b.x + b.w - 3, y, 'now', DIM);
+}
+
+// Word-wrap `text` into at most `n` lines of width w (last line truncated with …).
+function wrapText(text, w, n) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const word of words) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (next.length <= w) { cur = next; continue; }
+    if (cur) lines.push(cur);
+    cur = word;
+  }
+  if (cur) lines.push(cur);
+  if (lines.length > n) {
+    const last = lines.slice(n - 1).join(' ');
+    lines.length = n - 1;
+    lines.push(last.length > w ? `${last.slice(0, Math.max(0, w - 1))}…` : last);
+  }
+  return lines.map((l) => l.slice(0, w));
+}
+
+// JIRA rows; with spare height, long titles wrap onto a second line under the key.
+function issueRowsWrapped(cv, b, data, wrap) {
+  let y = b.y;
+  for (const issue of data.jira?.issues ?? []) {
+    if (y >= b.y + b.h) break;
+    const key = safeText(issue.key);
+    const tone = issue.state === 'todo' ? DIM : INK;
+    cv.put(b.x, y, issue.state === 'todo' ? '○' : '●', JIRA_TONE[issue.state] ?? DIM);
+    cv.text(b.x + 2, y, key, INK, b.w - 2);
+    const first = Math.max(0, b.w - key.length - 3);
+    const summary = safeText(issue.summary);
+    if (wrap && summary.length > first && y + 1 < b.y + b.h) {
+      let lead = '';
+      for (const word of summary.split(/\s+/)) { const next = lead ? `${lead} ${word}` : word; if (next.length > first) break; lead = next; }
+      cv.text(b.x + 3 + key.length, y, lead, tone, first);
+      const rest = summary.slice(lead.length).trim();
+      cv.text(b.x + 2, y + 1, wrapText(rest, b.w - 2, 1)[0] ?? '', tone, b.w - 2);
+      y += 2;
+    } else {
+      cv.text(b.x + 3 + key.length, y, summary, tone, first);
+      y += 1;
+    }
+  }
+}
+
+// Rows a JIRA list needs when every long title wraps once.
+function issueWrapRows(data, w) {
+  return (data.jira?.issues ?? []).slice(0, 12).reduce((n, i) => n + (safeText(i.summary).length > w - safeText(i.key).length - 3 ? 2 : 1), 0);
+}
+
 function blueprint(cv, data, now) {
   const f = facts(data, now);
   cv.fill(0, 0, cv.w, cv.h, BG);
@@ -1297,38 +1374,72 @@ function blueprint(cv, data, now) {
   row(cv, 0, 0, cv.w, head, clockTime(now), f.tone, gradient(0.9));
   const tbW = Math.min(cv.w, 28);
   const tbH = cv.h >= 18 ? 7 : 0;
-  flow(cv, [
-    { min: 5, max: 6, draw: (b) => {
+  const twoCol = cv.w >= 70;
+  const colW = twoCol ? Math.floor(cv.w / 2) : cv.w;
+  const jiraN = Math.min(8, Math.max(1, data.jira?.issues?.length ?? 0));
+  const jiraAll = Math.min(12, data.jira?.issues?.length ?? 0);
+  const agents = data.agents ?? [];
+  // Sections declare a base height (max) and how far they may grow (grow) when the pane has spare rows.
+  const sections = [
+    { min: 5, max: 6, grow: 2, draw: (b) => {
       const inner = thinFrame(cv, b, 'PLAN');
       const scale = Math.max(100, finite(f.fc?.projected) ? f.fc.projected : 0);
       const len = (v) => Math.max(1, Math.round(clamp(v, 0, scale) / scale * (inner.w - 8)));
       const lines = [['USED', f.used, CALM], ['PACE', f.fc?.pace, AMBER], ['PROJ', f.fc?.projected, f.fc?.projected > 100 ? ALERT : CALM]];
-      lines.slice(0, inner.h - 1).forEach(([name, v, tone], i) => {
-        cv.text(inner.x, inner.y + i, name, DIM);
-        if (finite(v)) dimension(cv, inner.x + 5, inner.y + i, len(v), percent(v), tone);
-        else cv.text(inner.x + 5, inner.y + i, '--', DIM);
+      const step = inner.h >= 6 ? 2 : 1; // spare height: one blank row between gauges
+      const shown = lines.slice(0, Math.max(1, Math.min(3, Math.floor((inner.h - 1 + step - 1) / step))));
+      shown.forEach(([name, v, tone], i) => {
+        const y = inner.y + i * step;
+        cv.text(inner.x, y, name, DIM);
+        if (finite(v)) dimension(cv, inner.x + 5, y, len(v), percent(v), tone);
+        else cv.text(inner.x + 5, y, '--', DIM);
       });
-      const y = inner.y + Math.min(3, inner.h - 1);
+      const y = Math.min(inner.y + inner.h - 1, inner.y + (shown.length - 1) * step + 1);
+      if (y <= inner.y + (shown.length - 1) * step) return;
       const x100 = inner.x + 5 + len(100) - 1;
       for (let x = inner.x + 5; x < inner.x + inner.w; x++) cv.put(x, y, '┈', DIM);
       cv.put(inner.x + 5, y, '0', DIM);
       if (x100 < inner.x + inner.w) cv.put(x100, y, '┬', INK);
       if (x100 + 4 < inner.x + inner.w) cv.text(x100 + 1, y, '100', DIM);
     } },
-    ...(f.fc ? [{ min: 4, max: 4, draw: (b) => {
+    ...(f.fc ? [{ min: 4, max: 4, grow: 10, draw: (b) => {
       const inner = thinFrame(cv, b, 'TREND');
-      sparkline(cv, inner.x, inner.y, inner.w, f.fc.trend, '14d');
-      if (inner.h > 1) row(cv, inner.x, inner.y + 1, inner.w, `→ ${percent(f.fc.projected)}`, f.fc.capAt ? `cap ${capDate(f.fc.capAt)}` : 'no cap', f.rows[2].tone, f.fc.capAt ? ALERT : DIM);
+      if (inner.h >= 4) barChart(cv, { ...inner, h: inner.h - 1 }, f.fc.trend ?? []);
+      else sparkline(cv, inner.x, inner.y, inner.w, f.fc.trend, '14d');
+      const y = inner.y + inner.h - 1;
+      if (inner.h > 1) row(cv, inner.x, y, inner.w, `→ ${percent(f.fc.projected)}`, f.fc.capAt ? `cap ${capDate(f.fc.capAt)}` : 'no cap', f.rows[2].tone, f.fc.capAt ? ALERT : DIM);
     } }] : []),
-    { min: 4, max: 6, draw: (b) => {
+    { min: 4, max: 6, grow: 0, draw: (b) => {
       const inner = thinFrame(cv, b, 'BURN');
       f.rows.slice(4, 4 + inner.h).forEach((r, i) => row(cv, inner.x, inner.y + i, inner.w, r.label, r.value, DIM, r.tone ?? INK));
     } },
-    ...(data.jira ? [{ min: 3, max: 2 + Math.min(8, Math.max(1, data.jira.issues?.length ?? 0)), draw: (b) => {
-      issueRows(cv, thinFrame(cv, b, jiraHead(data)), data);
+    ...(data.jira ? [{ min: 3, max: 2 + jiraN, grow: Math.max(0, 2 + issueWrapRows(data, colW - 4) - (2 + jiraN)) + Math.max(0, jiraAll - jiraN), draw: (b) => {
+      const inner = thinFrame(cv, b, jiraHead(data));
+      issueRowsWrapped(cv, inner, data, inner.h > jiraN);
     } }] : []),
-    ...(data.agents?.length ? [{ min: 3, max: 2 + data.agents.length, draw: (b) => agentRows(cv, thinFrame(cv, b, 'AGENTS'), data) }] : []),
-  ], { top: 1, bottom: cv.h - tbH });
+    ...(agents.length ? [{ min: 3, max: 2 + agents.length, grow: agents.length, draw: (b) => {
+      const inner = thinFrame(cv, b, 'AGENTS');
+      if (inner.h < agents.length * 2) return agentRows(cv, inner, data);
+      agents.forEach((a, i) => {
+        const y = inner.y + i * 2;
+        row(cv, inner.x, y, inner.w, safeText(a.label ?? '?'), percent(a.context), a.ubuntu ? UBUNTU : DIM);
+        const ctx = finite(a.context) ? clamp(a.context, 0, 100) : 0;
+        const n = Math.round(ctx / 100 * inner.w);
+        for (let x = 0; x < inner.w; x++) cv.put(inner.x + x, y + 1, x < n ? '▬' : '·', x < n ? (ctx > 80 ? ALERT : ctx > 60 ? AMBER : gradient(0.3 + 0.6 * x / inner.w)) : TRACK);
+      });
+    } }] : []),
+  ];
+  if (!twoCol) {
+    // Distribute spare rows round-robin, keeping a 2-row breather of grid paper above the title block.
+    const avail = cv.h - tbH - 1;
+    let spare = avail - sections.reduce((n, s) => n + s.max, 0) - 2;
+    let growing = sections.filter((s) => s.grow > 0);
+    while (spare > 0 && growing.length) {
+      for (const s of growing) if (spare > 0 && s.grow > 0) { s.max++; s.grow--; spare--; }
+      growing = growing.filter((s) => s.grow > 0);
+    }
+  }
+  flow(cv, sections, { top: 1, bottom: cv.h - tbH });
   if (tbH) {
     const b = { x: cv.w - tbW, y: cv.h - tbH, w: tbW, h: tbH };
     const inner = thinFrame(cv, b, 'TITLE BLOCK');
@@ -1338,7 +1449,6 @@ function blueprint(cv, data, now) {
     for (let y = inner.y; y < inner.y + inner.h && inner.w > 10; y++) cv.put(inner.x + 6, y, '│', DIM);
   }
 }
-
 // ---------- collection ----------
 
 // One short line for a tuios dock cell: "AIC 42% →198% RISK".

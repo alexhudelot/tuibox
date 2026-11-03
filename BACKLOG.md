@@ -31,6 +31,8 @@ Out of scope: Lucid diagrams and other non-tuibox work.
 
 ## Done
 
+- **TB-076** Blueprint style scales vertically (2026-11-03): spare rows are shared round-robin between PLAN (blank row between gauges), TREND (multi-row bar chart with peak/0 labels and a day axis, up to +10 rows), JIRA (long titles wrap onto a 2nd line; up to 12 items) and AGENTS (context bar per agent). A 2-row grid strip stays above the bottom-anchored TITLE BLOCK; short panes keep the compact layout; two-column widths unchanged. AC: test "blueprint scales vertically" (blank rows <= 16 at 33x69, axis/wrap/bars present, exact sizes); full suite 26/26; live PLAN pane checked.
+
 - **TB-060** Theme package format `themes/<name>/` (manifest + Windows/Ubuntu tuios themes), validator with WCAG contrast checks (body ≥ 7:1, dim ≥ 4.5:1), Windows/Ubuntu distinguishability check (36cc082).
 - **TB-061** zen packaged as the default theme; copilot-budget palette (data gradient, muted art slate, OK/WATCH/RISK, ubuntu accent) comes from the theme via `setPalette()`, `BUDGET_THEME` / `theme` setting, re-read every refresh (36cc082).
 - **TB-062** New themes nocturne, ember, mono with Ubuntu variants; all pass contrast (c1b12a0).

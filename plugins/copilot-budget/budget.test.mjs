@@ -397,3 +397,22 @@ test('style signatures: cockpit annunciators + dial, ledger rules without boxes,
   assert.match(blueprint, /GRADE/);
   assert.match(render(risky, 34, 40, NOW, { style: 'unknown' }), /PLAN/);
 });
+
+test('blueprint scales vertically: tall panes grow TREND/JIRA/AGENTS, short panes stay compact', () => {
+  const issues = Array.from({ length: 5 }, (_, i) => ({ key: `AO-${400 + i}`, summary: `Long ticket title number ${i} that needs wrapping here`, state: i ? 'todo' : 'progress' }));
+  const d = { ...full, jira: { loaded: true, issues }, agents: [{ label: 'SHERPA', context: 42 }, { label: 'PLAN', context: 85 }] };
+  const blank = (v) => v.split('\n').filter((l) => /^[\s·]*$/.test(l)).length;
+  const tall = strip(render(d, 33, 69, NOW, { style: 'blueprint' }));
+  const short = strip(render(d, 33, 30, NOW, { style: 'blueprint' }));
+  assert.ok(blank(tall) <= 16, `tall pane wastes ${blank(tall)} rows:\n${tall}`);
+  assert.match(tall, /└─*-\d+d/, 'multi-row trend axis');
+  assert.match(tall, /that needs/, 'wrapped jira title second line');
+  assert.match(tall, /▬/, 'agent context bars');
+  assert.match(tall.split('\n').at(-1), /┘$/, 'title block anchored at bottom');
+  assert.doesNotMatch(short, /└─*-\d+d/, 'short pane keeps single-line sparkline');
+  for (const [w, h] of [[33, 69], [33, 30], [80, 60], [24, 100]]) {
+    const lines = strip(render(d, w, h, NOW, { style: 'blueprint', color: true })).split('\n');
+    assert.equal(lines.length, h);
+    for (const l of lines) assert.equal([...l].length, w);
+  }
+});

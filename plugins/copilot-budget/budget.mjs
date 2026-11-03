@@ -1366,6 +1366,42 @@ function issueWrapRows(data, w) {
   return (data.jira?.issues ?? []).slice(0, 12).reduce((n, i) => n + (safeText(i.summary).length > w - safeText(i.key).length - 3 ? 2 : 1), 0);
 }
 
+// Vertical bar columns on a 0..100 scale with axis ticks; labels and values below (h >= 5).
+// cols: [{ label, value, tone }]; values above 100 clip with ▲ at the top.
+function vColumns(cv, b, cols) {
+  const chartH = b.h - 2;
+  const axis = 4;
+  const slot = Math.floor((b.w - axis) / cols.length);
+  if (chartH < 3 || slot < 2) return false;
+  const barW = Math.max(1, Math.min(slot - 1, 8));
+  for (let r = 0; r < chartH; r++) cv.put(b.x + axis - 1, b.y + r, '┤', DIM);
+  cv.text(b.x, b.y, '100', DIM);
+  cv.text(b.x, b.y + chartH - 1, '  0', DIM);
+  if (chartH >= 5) cv.text(b.x, b.y + Math.floor((chartH - 1) / 2), ' 50', DIM);
+  cols.forEach((c, i) => {
+    const x0 = b.x + axis + i * slot + Math.floor((slot - barW) / 2);
+    const v = finite(c.value) ? c.value : null;
+    const units = v === null ? 0 : Math.round(clamp(v, 0, 100) / 100 * chartH * 8);
+    for (let r = 0; r < chartH; r++) {
+      const y = b.y + chartH - 1 - r;
+      const fill = units - r * 8;
+      for (let k = 0; k < barW; k++) {
+        if (fill <= 0) cv.put(x0 + k, y, r === 0 ? '·' : ' ', TRACK);
+        else cv.put(x0 + k, y, fill >= 8 ? '█' : SPARK[fill - 1], typeof c.tone === 'function' ? c.tone(r / Math.max(1, chartH - 1)) : c.tone);
+      }
+    }
+    if (v !== null && v > 100) for (let k = 0; k < barW; k++) cv.put(x0 + k, b.y, '▲', ALERT);
+    const lx = b.x + axis + i * slot;
+    const lw = Math.min(slot - (slot > 2 ? 1 : 0), b.x + b.w - lx);
+    const name = String(c.label).slice(0, lw);
+    cv.text(lx + Math.floor((lw - name.length) / 2), b.y + chartH, name, c.labelTone ?? DIM, lw);
+    let pv = v === null ? '--' : `${Math.round(v)}%`;
+    if (pv.length > lw) pv = pv.replace('%', '');
+    cv.text(lx + Math.max(0, Math.floor((lw - pv.length) / 2)), b.y + chartH + 1, pv.slice(0, lw), INK, lw);
+  });
+  return true;
+}
+
 function blueprint(cv, data, now) {
   const f = facts(data, now);
   cv.fill(0, 0, cv.w, cv.h, BG);
@@ -1380,9 +1416,16 @@ function blueprint(cv, data, now) {
   const jiraAll = Math.min(12, data.jira?.issues?.length ?? 0);
   const agents = data.agents ?? [];
   // Sections declare a base height (max) and how far they may grow (grow) when the pane has spare rows.
+  const planSec = { min: 5, max: 6, grow: 2, vh: 11 };
+  const agentSec = { min: 3, max: 2 + agents.length, grow: agents.length, vh: 11 };
   const sections = [
-    { min: 5, max: 6, grow: 2, draw: (b) => {
+    Object.assign(planSec, { draw: (b) => {
       const inner = thinFrame(cv, b, 'PLAN');
+      if (planSec.vertical && vColumns(cv, inner, [
+        { label: 'USED', value: f.used, tone: (t) => gradient(0.3 + 0.6 * t) },
+        { label: 'PACE', value: f.fc?.pace, tone: AMBER },
+        { label: 'PROJ', value: f.fc?.projected, tone: f.fc?.projected > 100 ? ALERT : f.fc?.projected > f.fc?.target ? AMBER : CALM },
+      ])) return;
       const scale = Math.max(100, finite(f.fc?.projected) ? f.fc.projected : 0);
       const len = (v) => Math.max(1, Math.round(clamp(v, 0, scale) / scale * (inner.w - 8)));
       const lines = [['USED', f.used, CALM], ['PACE', f.fc?.pace, AMBER], ['PROJ', f.fc?.projected, f.fc?.projected > 100 ? ALERT : CALM]];
@@ -1401,8 +1444,8 @@ function blueprint(cv, data, now) {
       cv.put(inner.x + 5, y, '0', DIM);
       if (x100 < inner.x + inner.w) cv.put(x100, y, '┬', INK);
       if (x100 + 4 < inner.x + inner.w) cv.text(x100 + 1, y, '100', DIM);
-    } },
-    ...(f.fc ? [{ min: 4, max: 4, grow: 10, draw: (b) => {
+    } }),
+    ...(f.fc ? [{ min: 4, max: 4, grow: 999, draw: (b) => {
       const inner = thinFrame(cv, b, 'TREND');
       if (inner.h >= 4) barChart(cv, { ...inner, h: inner.h - 1 }, f.fc.trend ?? []);
       else sparkline(cv, inner.x, inner.y, inner.w, f.fc.trend, '14d');
@@ -1417,8 +1460,13 @@ function blueprint(cv, data, now) {
       const inner = thinFrame(cv, b, jiraHead(data));
       issueRowsWrapped(cv, inner, data, inner.h > jiraN);
     } }] : []),
-    ...(agents.length ? [{ min: 3, max: 2 + agents.length, grow: agents.length, draw: (b) => {
+    ...(agents.length ? [Object.assign(agentSec, { draw: (b) => {
       const inner = thinFrame(cv, b, 'AGENTS');
+      if (agentSec.vertical && vColumns(cv, inner, agents.map((a) => {
+        const ctx = finite(a.context) ? a.context : null;
+        return { label: safeText(a.label ?? '?'), value: ctx, labelTone: a.ubuntu ? UBUNTU : DIM,
+          tone: ctx > 80 ? ALERT : ctx > 60 ? AMBER : (t) => gradient(0.3 + 0.6 * t) };
+      }))) return;
       if (inner.h < agents.length * 2) return agentRows(cv, inner, data);
       agents.forEach((a, i) => {
         const y = inner.y + i * 2;
@@ -1427,12 +1475,19 @@ function blueprint(cv, data, now) {
         const n = Math.round(ctx / 100 * inner.w);
         for (let x = 0; x < inner.w; x++) cv.put(inner.x + x, y + 1, x < n ? '▬' : '·', x < n ? (ctx > 80 ? ALERT : ctx > 60 ? AMBER : gradient(0.3 + 0.6 * x / inner.w)) : TRACK);
       });
-    } }] : []),
+    } })] : []),
   ];
   if (!twoCol) {
     // Distribute spare rows round-robin, keeping a 2-row breather of grid paper above the title block.
     const avail = cv.h - tbH - 1;
     let spare = avail - sections.reduce((n, s) => n + s.max, 0) - 2;
+    // Narrow, tall panes: switch bar gauges to vertical columns when the extra rows fit.
+    for (const s of [planSec, ...(agents.length ? [agentSec] : [])]) {
+      const need = s.vh - s.max;
+      if (cv.w < 70 && need <= spare && (s !== agentSec || Math.floor((cv.w - 8) / agents.length) >= 2)) {
+        s.vertical = true; spare -= Math.max(0, need); s.max = Math.max(s.max, s.vh); s.grow = s === planSec ? 3 : 2;
+      }
+    }
     let growing = sections.filter((s) => s.grow > 0);
     while (spare > 0 && growing.length) {
       for (const s of growing) if (spare > 0 && s.grow > 0) { s.max++; s.grow--; spare--; }

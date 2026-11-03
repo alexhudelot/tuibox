@@ -391,7 +391,7 @@ test('style signatures: cockpit annunciators + dial, ledger rules without boxes,
   assert.match(ledger, /═{34}/);
   assert.doesNotMatch(ledger, /[╭┌│◦┄]/);
   assert.match(ledger.split('\n').find((l) => l.startsWith('PROJ')), /238%$/);
-  const blueprint = render(risky, 34, 40, NOW, { style: 'blueprint' });
+  const blueprint = render(risky, 34, 24, NOW, { style: 'blueprint' });
   assert.match(blueprint, /├─+ 238% ─+┤/);
   assert.match(blueprint, /TITLE BLOCK/);
   assert.match(blueprint, /GRADE/);
@@ -407,12 +407,32 @@ test('blueprint scales vertically: tall panes grow TREND/JIRA/AGENTS, short pane
   assert.ok(blank(tall) <= 16, `tall pane wastes ${blank(tall)} rows:\n${tall}`);
   assert.match(tall, /└─*-\d+d/, 'multi-row trend axis');
   assert.match(tall, /that needs/, 'wrapped jira title second line');
-  assert.match(tall, /▬/, 'agent context bars');
   assert.match(tall.split('\n').at(-1), /┘$/, 'title block anchored at bottom');
   assert.doesNotMatch(short, /└─*-\d+d/, 'short pane keeps single-line sparkline');
   for (const [w, h] of [[33, 69], [33, 30], [80, 60], [24, 100]]) {
     const lines = strip(render(d, w, h, NOW, { style: 'blueprint', color: true })).split('\n');
     assert.equal(lines.length, h);
     for (const l of lines) assert.equal([...l].length, w);
+  }
+});
+test('blueprint vertical gauges: columns at 20x69/33x69, horizontal fallback at 33x30, minimal filler', () => {
+  const d = { ...full, agents: [{ label: 'SHERPA', context: 42 }, { label: 'PLAN', context: 85 }, { label: 'UBUNTU', context: 65, ubuntu: true }] };
+  const blank = (v) => v.split('\n').filter((l) => /^[\s·]*$/.test(l)).length;
+  for (const w of [20, 33]) {
+    const v = strip(render(d, w, 69, NOW, { style: 'blueprint' }));
+    assert.match(v, /100┤/, `vertical scale at ${w}x69:\n${v}`);
+    assert.match(v, /US.*PA.*PR/, 'labels under plan columns');
+    assert.match(v, /SHE?.*PLA?.*UBU?/, 'agent labels under columns');
+    assert.doesNotMatch(v, /▬/, 'no horizontal agent bars');
+    assert.ok(blank(v) <= 2, `${w}x69 wastes ${blank(v)} rows:\n${v}`);
+    assert.match(v.split('\n').at(-1), /┘$/);
+  }
+  const short = strip(render(d, 33, 30, NOW, { style: 'blueprint' }));
+  assert.doesNotMatch(short, /100┤/);
+  assert.match(short, /├─+/);
+  for (const [w, h] of [[20, 69], [33, 69], [33, 30], [20, 20], [40, 120], [70, 69], [12, 8], [26, 45]]) {
+    const lines = strip(render(d, w, h, NOW, { style: 'blueprint', color: true })).split('\n');
+    assert.equal(lines.length, h, `${w}x${h}`);
+    for (const l of lines) assert.equal([...l].length, w, `${w}x${h}`);
   }
 });

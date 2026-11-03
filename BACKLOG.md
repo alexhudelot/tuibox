@@ -31,6 +31,7 @@ Out of scope: Lucid diagrams and other non-tuibox work.
 
 ## Done
 
+- **TB-077** Blueprint vertical gauges + fill (2026-11-03): in narrow tall panes PLAN (USED/PACE/PROJ) and AGENTS context render as upward columns on a 0/50/100 scale (PROJ >100 clipped with ▲; agents amber >60%, red >80%; abbreviated labels and % below); remaining rows go to TREND (uncapped), only the 2-row grid strip stays above the TITLE BLOCK; horizontal fallback when height is short; BOMs stripped. AC: tests vertical at 20x69/33x69 with <=2 filler rows, fallback at 33x30, exact size at 8 sizes; suite 27/27; live PLAN capture.
 - **TB-076** Blueprint style scales vertically (2026-11-03): spare rows are shared round-robin between PLAN (blank row between gauges), TREND (multi-row bar chart with peak/0 labels and a day axis, up to +10 rows), JIRA (long titles wrap onto a 2nd line; up to 12 items) and AGENTS (context bar per agent). A 2-row grid strip stays above the bottom-anchored TITLE BLOCK; short panes keep the compact layout; two-column widths unchanged. AC: test "blueprint scales vertically" (blank rows <= 16 at 33x69, axis/wrap/bars present, exact sizes); full suite 26/26; live PLAN pane checked.
 
 - **TB-060** Theme package format `themes/<name>/` (manifest + Windows/Ubuntu tuios themes), validator with WCAG contrast checks (body ≥ 7:1, dim ≥ 4.5:1), Windows/Ubuntu distinguishability check (36cc082).
